@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7f5">
+  <title>Entrar · Mark Shaney BR</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { min-height: 100dvh; display: grid; place-items: center; margin: 0; padding: 20px; color: #20211f; background: #f7f7f5; font: 15px/1.5 ui-sans-serif, system-ui, sans-serif; }
+    main { width: min(100%, 400px); padding: 34px; border: 1px solid #e8e9e4; border-radius: 24px; background: #fff; box-shadow: 0 14px 40px rgba(31, 38, 32, .06); }
+    .mark { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 15px; color: #fff; background: #3b6655; font: 25px Georgia, serif; }
+    h1 { margin: 18px 0 4px; font: 500 27px/1.2 Georgia, serif; }
+    p { margin: 0 0 24px; color: #777a74; }
+    label { display: block; margin: 15px 0 6px; font-weight: 600; font-size: 13px; }
+    input { width: 100%; padding: 12px 13px; border: 1px solid #dfe1da; border-radius: 11px; color: #20211f; background: #fff; font: inherit; }
+    input:focus { outline: 3px solid rgba(59, 102, 85, .14); border-color: #3b6655; }
+    button { width: 100%; margin-top: 21px; padding: 12px; border: 0; border-radius: 11px; color: #fff; background: #3b6655; font: 600 15px system-ui, sans-serif; cursor: pointer; }
+    button:hover { background: #294a3c; }
+    .error { margin: 13px 0 0; color: #a73f3f; font-size: 13px; }
+    .error[hidden] { display: none; }
+    @media (max-width: 440px) { main { padding: 27px 22px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="mark" aria-hidden="true">M</div>
+    <h1>Mark Shaney BR</h1>
+    <p>Entre para pesquisar e escrever.</p>
+    <form method="post" action="/login">
+      <label for="username">Login</label>
+      <input id="username" name="username" type="text" autocomplete="username" required autofocus>
+      <label for="password">Senha</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Entrar</button>
+      <p class="error" id="error" role="alert" hidden>Login ou senha incorretos.</p>
+    </form>
+  </main>
+  <script>
+    if (new URLSearchParams(location.search).has('erro')) document.querySelector('#error').hidden = false;
+  </script>
+</body>
+</html>

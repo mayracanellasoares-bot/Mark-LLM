@@ -35,6 +35,9 @@
     .brand h1 { margin: 0; font: 600 17px/1.2 Georgia, "Times New Roman", serif; letter-spacing: -.15px; }
     .brand p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
     .status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: #5d625b; background: rgba(255,255,255,.72); font-size: 12px; white-space: nowrap; }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .logout { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: white; cursor: pointer; font-size: 12px; }
+    .logout:hover { color: var(--ink); background: var(--soft); }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: #c18c48; }
     .status.active .dot { background: #4d9a68; }
     .panel { flex: 1; min-height: min(70vh, 720px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--paper); box-shadow: var(--shadow); }
@@ -57,6 +60,9 @@
     .model-switcher select { max-width: min(100%, 320px); padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: #fff; }
     .chip { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: #555a54; background: #fff; cursor: pointer; font-size: 12px; transition: background .15s, border-color .15s; }
     .chip:hover { background: var(--soft); border-color: #d5d8d1; }
+    .web-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+    .export-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .export-actions button { background: white; color: var(--accent); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; cursor: pointer; font: inherit; font-size: 11px; }
     .composer { display: flex; align-items: flex-end; gap: 10px; padding: 10px 10px 10px 15px; border: 1px solid #dfe1da; border-radius: 19px; background: #fff; box-shadow: 0 4px 15px rgba(31,38,32,.035); }
     .composer:focus-within { border-color: #9ab2a4; box-shadow: 0 0 0 3px rgba(59,102,85,.08); }
     textarea { width: 100%; max-height: 170px; min-height: 26px; resize: none; padding: 3px 0; border: 0; outline: 0; color: var(--ink); background: transparent; }
@@ -94,14 +100,17 @@
         <div class="mark" aria-hidden="true">M</div>
         <div><h1>Mark Shaney BR</h1><p>Oficina literária e pesquisa com fontes</p></div>
       </div>
-      <div class="status" id="status"><span class="dot"></span><span id="statusText">Conectando…</span></div>
+      <div class="header-actions">
+        <div class="status" id="status"><span class="dot"></span><span id="statusText">Conectando…</span></div>
+        <form method="post" action="/logout"><button class="logout" type="submit">Sair</button></form>
+      </div>
     </header>
     <section class="panel" aria-label="Conversa com Mark Shaney BR">
       <div class="messages" id="messages" aria-live="polite">
         <div class="welcome" id="welcome">
           <div class="welcome-mark" aria-hidden="true">M</div>
           <h2>O que vamos pesquisar ou escrever?</h2>
-          <p>Pesquise fontes literárias, recupere trechos que você salvou ou comece um texto original inspirado em temas e recursos narrativos.</p>
+          <p>Pesquise na web, crie textos e baixe as respostas em Word, planilha ou PDF.</p>
         </div>
       </div>
       <div class="composer-wrap">
@@ -113,8 +122,10 @@
           <button class="chip" data-prompt="/wiki ">Pesquisar na Wikipédia</button>
           <button class="chip" data-prompt="/gutenberg ">Buscar livros</button>
           <button class="chip" data-prompt="/escrever conto | ">Escrever um conto</button>
+          <button class="chip" data-prompt="Crie uma planilha com colunas e linhas sobre ">Criar planilha</button>
           <button class="chip" data-prompt="/ajuda">Ver comandos</button>
         </div>
+        <label class="web-toggle"><input id="web" type="checkbox" checked> Pesquisar na internet nesta resposta</label>
         <form class="composer" id="form">
           <label class="hidden" for="input">Sua mensagem</label>
           <textarea id="input" rows="1" placeholder="Escreva uma pergunta ou use /comando…" autocomplete="off"></textarea>
@@ -133,6 +144,7 @@
     const send = document.querySelector('#send');
     const welcome = document.querySelector('#welcome');
     const provider = document.querySelector('#provider');
+    const webSearch = document.querySelector('#web');
 
     function updateModelStatus() {
       const option = provider.selectedOptions[0];
@@ -155,9 +167,39 @@
       bubble.className = 'bubble';
       bubble.textContent = text;
       row.append(bubble);
+      if (role === 'assistant' && !extraClass) addExportActions(row, text);
       messages.append(row);
       messages.scrollTop = messages.scrollHeight;
       return row;
+    }
+
+    function addExportActions(row, content) {
+      const actions = document.createElement('div');
+      actions.className = 'export-actions';
+      for (const format of ['docx', 'xlsx', 'pdf']) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = `Baixar ${format.toUpperCase()}`;
+        button.addEventListener('click', async () => {
+          button.disabled = true;
+          try {
+            const response = await fetch('/api/export', {
+              method: 'POST', headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ content, format })
+            });
+            if (!response.ok) throw new Error((await response.json()).error || 'Falha no download.');
+            const url = URL.createObjectURL(await response.blob());
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `mark-shaney.${format}`;
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+          } catch (error) { alert(error.message); }
+          finally { button.disabled = false; }
+        });
+        actions.append(button);
+      }
+      row.querySelector('.bubble').append(actions);
     }
 
     async function submitMessage(text) {
@@ -172,11 +214,12 @@
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, provider: provider.value || null })
+          body: JSON.stringify({ message, provider: provider.value || null, web: webSearch.checked })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o pedido.');
         pending.querySelector('.bubble').textContent = data.reply;
+        addExportActions(pending, data.reply);
         pending.classList.remove('typing');
       } catch (error) {
         pending.querySelector('.bubble').textContent = `Erro: ${error.message}`;

@@ -25,10 +25,32 @@ class ProviderRoutingTests(unittest.TestCase):
             "MANDAPI_API_KEY": "test-mandapi",
             "MARK_MODEL2": "deepseek-v4-flash",
             "MARK_BASE_URL2": "https://api.mandapi.com/v1",
+            "MARK_WEB_USER": "Mark",
+            "MARK_WEB_PASSWORD": "test-password",
         }, clear=True)
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.client = web.app.test_client()
+        response = self.client.post("/login", data={"username": "Mark", "password": "test-password"})
+        self.assertEqual(response.status_code, 302)
+
+    def test_login_guards_site_and_api_and_logout_ends_session(self):
+        visitor = web.app.test_client()
+        self.assertEqual(visitor.get("/").status_code, 302)
+        self.assertEqual(visitor.get("/static/index.html").status_code, 302)
+        self.assertEqual(visitor.get("/api/status").status_code, 401)
+        self.assertEqual(visitor.post("/api/chat", json={"message": "Olá"}).status_code, 401)
+        self.assertEqual(visitor.get("/healthz").status_code, 200)
+        login_page = visitor.get("/login")
+        self.assertEqual(login_page.status_code, 200)
+        self.assertNotIn("test-password", login_page.get_data(as_text=True))
+        login_page.close()
+        self.assertIn("erro=1", visitor.post("/login", data={"username": "Mark", "password": "errada"}).location)
+        self.assertEqual(visitor.get("/api/status").status_code, 401)
+        visitor.post("/login", data={"username": "Mark", "password": "test-password"})
+        self.assertEqual(visitor.get("/api/status").status_code, 200)
+        visitor.post("/logout")
+        self.assertEqual(visitor.get("/api/status").status_code, 401)
 
     def test_status_lists_models_without_credentials(self):
         response = self.client.get("/api/status")
@@ -66,11 +88,54 @@ class ProviderRoutingTests(unittest.TestCase):
         network.assert_not_called()
 
     def test_mandapi_alone_uses_documented_defaults(self):
-        with mock.patch.dict(os.environ, {"MANDAPI_API_KEY": "test-mandapi"}, clear=True):
+        with mock.patch.dict(os.environ, {"MANDAPI_API_KEY": "test-mandapi", "MARK_WEB_PASSWORD": "test-password"}, clear=True):
             status = self.client.get("/api/status").get_json()
             self.assertEqual(status["default_provider"], "mandapi")
             self.assertEqual(status["model"], "deepseek-v4-flash")
             self.assertEqual([item["id"] for item in status["providers"]], ["mandapi"])
+
+    def test_web_search_uses_maritaca_and_passes_evidence_to_mandapi(self):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            payload = json.loads(request.data)
+            calls.append(payload)
+            answer = 'Fonte: https://example.org' if payload['model'] == 'sabia-4' else 'Resumo com evidência'
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': answer}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            response = self.client.post('/api/chat', json={'message': 'Novidades', 'provider': 'mandapi', 'web': True})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['web_used'])
+        self.assertTrue(calls[0]['web_search'])
+        self.assertNotIn('web_search', calls[1])
+        self.assertIn('https://example.org', str(calls[1]['messages']))
+
+    def test_provider_failure_falls_back_and_reports_actual_provider(self):
+        from urllib.error import URLError
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.full_url)
+            if 'mandapi' in request.full_url:
+                raise URLError('provider unavailable')
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': 'Resposta reserva'}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            response = self.client.post('/api/chat', json={'message': 'Olá', 'provider': 'mandapi'})
+        self.assertEqual(response.get_json()['provider'], 'primary')
+        self.assertEqual(len(calls), 2)
+
+    def test_export_files_are_real_and_login_protected(self):
+        import zipfile
+        for kind, signature in [('docx', b'PK'), ('xlsx', b'PK'), ('pdf', b'%PDF')]:
+            response = self.client.post('/api/export', json={'format': kind, 'content': 'Título\nAção,Valor\nLivro,3'})
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.data.startswith(signature))
+            if kind != 'pdf':
+                with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+                    self.assertTrue(archive.namelist())
+        self.assertEqual(web.app.test_client().post('/api/export', json={'format': 'pdf', 'content': 'Teste'}).status_code, 401)
 
 
 if __name__ == "__main__":
