@@ -162,6 +162,7 @@ def chat():
             "model": providers[bot.last_provider]["model"] if bot.last_provider else None,
             "provider": bot.last_provider,
             "web_used": bot.web_used,
+            "provider_issues": bot.provider_issues,
         })
     finally:
         bot.memoria.fechar()

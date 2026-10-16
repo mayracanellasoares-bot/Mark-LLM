@@ -219,6 +219,11 @@
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o pedido.');
         pending.querySelector('.bubble').textContent = data.reply;
+        if (data.provider_issues?.length) {
+          const detail = document.createElement('small');
+          detail.textContent = `\n\nProvedor alternativo usado. ${data.provider_issues.join('; ')}`;
+          pending.querySelector('.bubble').append(detail);
+        }
         addExportActions(pending, data.reply);
         pending.classList.remove('typing');
       } catch (error) {
