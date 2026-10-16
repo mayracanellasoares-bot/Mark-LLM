@@ -55,3 +55,5 @@ Após uma resposta, use **Baixar DOCX**, **Baixar XLSX** ou **Baixar PDF**. A pl
 
 **Modos de resposta:** Rápido usa respostas mais curtas (até 700 tokens); Equilibrado usa até 2048; Pensamento usa até 4096 e instruções de verificação. Internamente, o modo Pensamento usa `sabia-4-thinking` no provedor principal (configurável por `MARK_THINKING_MODEL`). Na alternativa, continua `deepseek-v4-flash` com instruções mais cuidadosas. A pesquisa na internet é independente do modo e aumenta o tempo de resposta e o uso da API.
 
+Respostas curtas que apenas pedem para reformular a pergunta recebem uma nova tentativa com instrução para responder à interpretação mais provável; se necessário, a outra API é tentada. Respostas de erro das duas APIs retornam HTTP 503, sem gravar uma falsa resposta na conversa. O texto remove marcadores de ênfase com asteriscos, preservando blocos e trechos de código entre crases.
+

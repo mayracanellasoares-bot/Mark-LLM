@@ -216,8 +216,14 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message, web: webSearch.checked, mode: mode.value })
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o pedido.');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 401) {
+            location.assign('/login');
+            return;
+          }
+          throw new Error(data.error || 'A conexão foi interrompida. Tente enviar novamente.');
+        }
         pending.querySelector('.bubble').textContent = data.reply;
         if (data.provider_issues?.length) {
           const detail = document.createElement('small');
@@ -228,6 +234,7 @@
         pending.classList.remove('typing');
       } catch (error) {
         pending.querySelector('.bubble').textContent = `Erro: ${error.message}`;
+        input.value = message;
         pending.classList.remove('typing');
       } finally {
         send.disabled = false;

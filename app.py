@@ -151,6 +151,8 @@ def chat():
     bot, _ = _new_bot()
     try:
         reply = bot.executar(message, provider=selected, web=web, mode=mode)
+        if bot.last_error:
+            return jsonify({"error": reply, "retryable": False}), (400 if message.startswith('/') else 503)
         if message == "/nova":
             session["conversation_id"] = bot.sessao
         return jsonify({

@@ -236,6 +236,40 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertEqual(self.client.post('/api/export', json={'format': 'zip', 'content': 'ok'}).status_code, 400)
         self.assertEqual(self.client.post('/api/export', json={'format': 'pdf', 'content': 'x' * 25001}).status_code, 400)
 
+    def test_generic_request_to_rephrase_gets_a_real_retry(self):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            payload = json.loads(request.data)
+            calls.append(payload)
+            content = 'Pode reformular a pergunta?' if len(calls) == 1 else '**Resposta útil:** a regência depende do sentido.'
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': content}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            result = self.client.post('/api/chat', json={'message': 'Explique a regência de assistir', 'web': False})
+        self.assertEqual(len(calls), 2)
+        self.assertIn('resposta anterior ficou', calls[1]['messages'][0]['content'].lower())
+        self.assertEqual(result.get_json()['reply'], 'Resposta útil: a regência depende do sentido.')
+
+    def test_formatting_preserves_code_operators_and_history_skips_bad_reply(self):
+        from mark_shaney_br import limpar_formatacao, resposta_insuficiente
+        self.assertTrue(resposta_insuficiente('Poderia reformular a pergunta?'))
+        self.assertFalse(resposta_insuficiente('A resposta é 42. Se quiser, pode reformular a pergunta com outra condição.'))
+        self.assertEqual(limpar_formatacao('**Título** e *ênfase* `f(**kwargs)`\n```python\nf(**kwargs)\n```'),
+                         'Título e ênfase `f(**kwargs)`\n```python\nf(**kwargs)\n```')
+
+    def test_both_provider_errors_are_reported_as_service_error(self):
+        from urllib.error import HTTPError
+
+        def fail(request, timeout):
+            raise HTTPError(request.full_url, 503, 'offline', {}, io.BytesIO())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fail):
+            result = self.client.post('/api/chat', json={'message': 'Pergunta', 'web': False})
+        self.assertEqual(result.status_code, 503)
+        self.assertNotIn('reply', result.get_json())
+        self.assertIn('indisponíveis', result.get_json()['error'])
+
 
 if __name__ == "__main__":
     unittest.main()
