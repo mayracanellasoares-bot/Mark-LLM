@@ -29,7 +29,13 @@ def create_export(content: str, kind: str) -> tuple[BytesIO, str, str]:
         else:
             rows = list(csv.reader(lines)) if any(',' in line for line in lines) else [[line] for line in lines]
         for row in rows[:3000]:
-            sheet.append([str(cell)[:30000] for cell in row[:50]])
+            safe = []
+            for cell in row[:50]:
+                value = str(cell)[:30000]
+                if value.lstrip().startswith(('=', '+', '-', '@')):
+                    value = "'" + value
+                safe.append(value)
+            sheet.append(safe)
         for cell in sheet[1]:
             cell.font = Font(bold=True)
         for column in sheet.columns:

@@ -150,17 +150,21 @@ def chat():
     web = body.get("web", False)
     if not isinstance(web, bool):
         return jsonify({"error": "Opção de pesquisa inválida."}), 400
+    mode = body.get('mode', 'balanced')
+    if mode not in ('fast', 'balanced', 'thinking'):
+        return jsonify({'error': 'Modo de resposta inválido.'}), 400
 
     bot, _ = _new_bot()
     try:
-        reply = bot.executar(message, provider=selected, web=web)
+        reply = bot.executar(message, provider=selected, web=web, mode=mode)
         if message == "/nova":
             session["conversation_id"] = bot.sessao
         return jsonify({
             "reply": reply,
             "llm_enabled": bool(providers),
-            "model": providers[bot.last_provider]["model"] if bot.last_provider else None,
+            "model": bot.last_model,
             "provider": bot.last_provider,
+            "mode": mode,
             "web_used": bot.web_used,
             "provider_issues": bot.provider_issues,
         })

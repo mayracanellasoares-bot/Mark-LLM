@@ -51,3 +51,5 @@ No chat, marque **Pesquisar na internet nesta resposta** para usar a busca na we
 
 Após uma resposta, use **Baixar DOCX**, **Baixar XLSX** ou **Baixar PDF**. A planilha converte tabelas Markdown ou linhas CSV em células; outros textos ficam em uma coluna. Os arquivos são gerados na hora, sem armazenamento no servidor.
 
+**Modos de resposta:** Rápido usa respostas mais curtas (até 700 tokens); Equilibrado usa até 2048; Pensamento usa até 4096 e instruções de verificação. Com Maritaca, Pensamento troca para `sabia-4-thinking` (personalizável por `MARK_THINKING_MODEL`). Com MandAPI, continua `deepseek-v4-flash` com instruções mais cuidadosas; o app informa o modelo efetivo na resposta. A opção de pesquisa na internet é independente do modo, mas aumenta o tempo de resposta e o uso da API.
+

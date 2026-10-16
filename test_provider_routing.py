@@ -137,6 +137,65 @@ class ProviderRoutingTests(unittest.TestCase):
                     self.assertTrue(archive.namelist())
         self.assertEqual(web.app.test_client().post('/api/export', json={'format': 'pdf', 'content': 'Teste'}).status_code, 401)
 
+    def test_response_modes_set_limits_and_report_real_model(self):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(json.loads(request.data))
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': 'Tudo certo'}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            for mode in ('fast', 'balanced', 'thinking'):
+                response = self.client.post('/api/chat', json={'message': 'Explique', 'provider': 'primary', 'mode': mode})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()['mode'], mode)
+        self.assertEqual([call['max_tokens'] for call in calls], [700, 2048, 4096])
+        self.assertEqual([call['model'] for call in calls], ['sabia-4', 'sabia-4', 'sabia-4-thinking'])
+        self.assertEqual(response.get_json()['model'], 'sabia-4-thinking')
+        self.assertIn('sem expor raciocínio interno', calls[-1]['messages'][0]['content'])
+
+    def test_mandapi_thinking_keeps_its_model_and_mode_validation(self):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(json.loads(request.data))
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': 'OK'}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            result = self.client.post('/api/chat', json={'message': 'Calcule', 'provider': 'mandapi', 'mode': 'thinking'})
+        self.assertEqual(result.get_json()['model'], 'deepseek-v4-flash')
+        self.assertEqual(calls[0]['max_tokens'], 4096)
+        self.assertEqual(calls[0]['model'], 'deepseek-v4-flash')
+        self.assertEqual(self.client.post('/api/chat', json={'message': 'Olá', 'mode': 'desconhecido'}).status_code, 400)
+
+    def test_thinking_fallback_reports_actual_provider_and_model(self):
+        from urllib.error import HTTPError
+
+        def fake_urlopen(request, timeout):
+            payload = json.loads(request.data)
+            if payload['model'] == 'sabia-4-thinking':
+                raise HTTPError(request.full_url, 429, 'rate limit', {}, io.BytesIO())
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': 'Reserva'}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            result = self.client.post('/api/chat', json={'message': 'Pense', 'provider': 'primary', 'mode': 'thinking'})
+        self.assertEqual(result.get_json()['provider'], 'mandapi')
+        self.assertEqual(result.get_json()['model'], 'deepseek-v4-flash')
+        self.assertEqual(result.get_json()['provider_issues'], ['Maritaca: HTTP 429'])
+
+    def test_spreadsheet_export_does_not_execute_untrusted_formulas(self):
+        from openpyxl import load_workbook
+        data = self.client.post('/api/export', json={'format': 'xlsx', 'content': 'Campo,Valor\nInseguro,=2+2'}).data
+        sheet = load_workbook(io.BytesIO(data)).active
+        self.assertEqual(sheet['B2'].data_type, 's')
+        self.assertEqual(sheet['B2'].value, "'=2+2")
+
+    def test_bad_payload_and_file_size_are_rejected(self):
+        self.assertEqual(self.client.post('/api/chat', json={'message': 'Olá', 'web': 'yes'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/chat', json={'message': 'Olá', 'mode': {}}).status_code, 400)
+        self.assertEqual(self.client.post('/api/export', json={'format': 'zip', 'content': 'ok'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/export', json={'format': 'pdf', 'content': 'x' * 25001}).status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
