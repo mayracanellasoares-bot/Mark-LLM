@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7f5">
+  <meta name="description" content="Mark Shaney BR — oficina literária e pesquisa com fontes.">
+  <title>Mark Shaney BR</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f7f7f5;
+      --paper: #fff;
+      --ink: #20211f;
+      --muted: #777a74;
+      --line: #e8e9e4;
+      --soft: #f0f1ed;
+      --accent: #3b6655;
+      --accent-dark: #294a3c;
+      --shadow: 0 14px 40px rgba(31, 38, 32, .06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--page);
+      color: var(--ink);
+      font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, textarea { font: inherit; }
+    .shell { max-width: 980px; min-height: 100vh; margin: 0 auto; padding: 22px 22px 18px; display: flex; flex-direction: column; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 2px 20px; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 15px; background: var(--accent); color: white; font-family: Georgia, serif; font-size: 23px; box-shadow: 0 5px 14px rgba(59, 102, 85, .18); }
+    .brand h1 { margin: 0; font: 600 17px/1.2 Georgia, "Times New Roman", serif; letter-spacing: -.15px; }
+    .brand p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .status { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: #5d625b; background: rgba(255,255,255,.72); font-size: 12px; white-space: nowrap; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #c18c48; }
+    .status.active .dot { background: #4d9a68; }
+    .panel { flex: 1; min-height: min(70vh, 720px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--paper); box-shadow: var(--shadow); }
+    .messages { flex: 1; overflow: auto; padding: clamp(18px, 4vw, 34px); scroll-behavior: smooth; }
+    .welcome { max-width: 620px; margin: 7vh auto 30px; text-align: center; }
+    .welcome-mark { width: 54px; height: 54px; margin: 0 auto 16px; display: grid; place-items: center; border-radius: 19px; color: white; background: var(--accent); font: 28px Georgia, serif; }
+    .welcome h2 { margin: 0; font: 500 clamp(23px, 4vw, 30px)/1.2 Georgia, "Times New Roman", serif; letter-spacing: -.4px; }
+    .welcome p { max-width: 490px; margin: 10px auto 0; color: var(--muted); }
+    .message { display: flex; margin: 20px 0; gap: 11px; align-items: flex-start; }
+    .message.user { justify-content: flex-end; }
+    .bubble { max-width: min(78%, 700px); padding: 13px 16px; border: 1px solid var(--line); border-radius: 17px; background: #fbfbf9; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .message.user .bubble { color: white; background: var(--accent); border-color: var(--accent); border-bottom-right-radius: 5px; }
+    .message.assistant .bubble { border-bottom-left-radius: 5px; }
+    .avatar { width: 29px; height: 29px; flex: 0 0 29px; display: grid; place-items: center; color: var(--accent-dark); background: #eaf0eb; border-radius: 11px; font: 17px Georgia, serif; }
+    .message.user .avatar { display: none; }
+    .composer-wrap { padding: 0 clamp(14px, 3vw, 28px) 20px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .chip { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: #555a54; background: #fff; cursor: pointer; font-size: 12px; transition: background .15s, border-color .15s; }
+    .chip:hover { background: var(--soft); border-color: #d5d8d1; }
+    .composer { display: flex; align-items: flex-end; gap: 10px; padding: 10px 10px 10px 15px; border: 1px solid #dfe1da; border-radius: 19px; background: #fff; box-shadow: 0 4px 15px rgba(31,38,32,.035); }
+    .composer:focus-within { border-color: #9ab2a4; box-shadow: 0 0 0 3px rgba(59,102,85,.08); }
+    textarea { width: 100%; max-height: 170px; min-height: 26px; resize: none; padding: 3px 0; border: 0; outline: 0; color: var(--ink); background: transparent; }
+    textarea::placeholder { color: #9a9d96; }
+    .send { width: 39px; height: 39px; flex: 0 0 39px; border: 0; border-radius: 13px; color: white; background: var(--accent); cursor: pointer; display: grid; place-items: center; transition: background .15s, transform .15s; }
+    .send:hover { background: var(--accent-dark); }
+    .send:active { transform: scale(.96); }
+    .send:disabled { opacity: .5; cursor: wait; }
+    .send svg { width: 18px; height: 18px; }
+    .footnote { margin: 9px 4px 0; color: #92958e; text-align: center; font-size: 11px; }
+    .typing { color: var(--muted); font-size: 13px; }
+    .hidden { display: none; }
+    @media (max-width: 600px) {
+      .shell { padding: 12px 10px 10px; }
+      header { padding: 5px 3px 14px; }
+      .brand { gap: 9px; }
+      .mark { width: 38px; height: 38px; border-radius: 13px; }
+      .brand h1 { font-size: 16px; }
+      .brand p { font-size: 11px; }
+      .status { padding: 6px 8px; font-size: 10px; }
+      .panel { min-height: calc(100dvh - 76px); border-radius: 19px; }
+      .messages { padding: 18px 14px; }
+      .welcome { margin: 9vh auto 22px; }
+      .bubble { max-width: 87%; padding: 11px 13px; }
+      .composer-wrap { padding: 0 11px 13px; }
+      .chips { gap: 6px; }
+      .chip { padding: 7px 9px; font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand">
+        <div class="mark" aria-hidden="true">M</div>
+        <div><h1>Mark Shaney BR</h1><p>Oficina literária e pesquisa com fontes</p></div>
+      </div>
+      <div class="status" id="status"><span class="dot"></span><span id="statusText">Conectando…</span></div>
+    </header>
+    <section class="panel" aria-label="Conversa com Mark Shaney BR">
+      <div class="messages" id="messages" aria-live="polite">
+        <div class="welcome" id="welcome">
+          <div class="welcome-mark" aria-hidden="true">M</div>
+          <h2>O que vamos pesquisar ou escrever?</h2>
+          <p>Pesquise fontes literárias, recupere trechos que você salvou ou comece um texto original inspirado em temas e recursos narrativos.</p>
+        </div>
+      </div>
+      <div class="composer-wrap">
+        <div class="chips" aria-label="Atalhos">
+          <button class="chip" data-prompt="/wiki ">Pesquisar na Wikipédia</button>
+          <button class="chip" data-prompt="/gutenberg ">Buscar livros</button>
+          <button class="chip" data-prompt="/escrever conto | ">Escrever um conto</button>
+          <button class="chip" data-prompt="/ajuda">Ver comandos</button>
+        </div>
+        <form class="composer" id="form">
+          <label class="hidden" for="input">Sua mensagem</label>
+          <textarea id="input" rows="1" placeholder="Escreva uma pergunta ou use /comando…" autocomplete="off"></textarea>
+          <button class="send" id="send" type="submit" aria-label="Enviar mensagem">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </form>
+        <p class="footnote">A memória é separada por navegador. Sem LLM configurada, o bot pesquisa trechos e oferece roteiros de escrita.</p>
+      </div>
+    </section>
+  </main>
+  <script>
+    const form = document.querySelector('#form');
+    const input = document.querySelector('#input');
+    const messages = document.querySelector('#messages');
+    const send = document.querySelector('#send');
+    const welcome = document.querySelector('#welcome');
+
+    function addMessage(role, text, extraClass = '') {
+      welcome.classList.add('hidden');
+      const row = document.createElement('div');
+      row.className = `message ${role} ${extraClass}`;
+      if (role === 'assistant') {
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        avatar.textContent = 'M';
+        row.append(avatar);
+      }
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.textContent = text;
+      row.append(bubble);
+      messages.append(row);
+      messages.scrollTop = messages.scrollHeight;
+      return row;
+    }
+
+    async function submitMessage(text) {
+      const message = text.trim();
+      if (!message || send.disabled) return;
+      addMessage('user', message);
+      input.value = '';
+      input.style.height = 'auto';
+      send.disabled = true;
+      const pending = addMessage('assistant', 'Consultando…', 'typing');
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o pedido.');
+        pending.querySelector('.bubble').textContent = data.reply;
+        pending.classList.remove('typing');
+      } catch (error) {
+        pending.querySelector('.bubble').textContent = `Erro: ${error.message}`;
+        pending.classList.remove('typing');
+      } finally {
+        send.disabled = false;
+        input.focus();
+        messages.scrollTop = messages.scrollHeight;
+      }
+    }
+
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      submitMessage(input.value);
+    });
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 170)}px`;
+    });
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    document.querySelectorAll('[data-prompt]').forEach(button => {
+      button.addEventListener('click', () => {
+        input.value = button.dataset.prompt;
+        input.focus();
+        input.setSelectionRange(input.value.length, input.value.length);
+      });
+    });
+
+    fetch('/api/status').then(response => response.json()).then(data => {
+      const status = document.querySelector('#status');
+      const label = document.querySelector('#statusText');
+      if (data.llm_enabled) {
+        status.classList.add('active');
+        label.textContent = data.model ? `LLM ativa · ${data.model}` : 'LLM ativa';
+      } else {
+        label.textContent = 'Pesquisa e memória locais';
+      }
+    }).catch(() => {
+      document.querySelector('#statusText').textContent = 'Sem conexão com o servidor';
+    });
+  </script>
+</body>
+</html>
