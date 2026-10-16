@@ -30,7 +30,7 @@ app.config.update(
 
 @app.before_request
 def require_login():
-    if request.endpoint in {"login", "healthz"}:
+    if request.endpoint in {"login", "healthz", "manifest", "service_worker", "app_icon", "favicon"}:
         return None
     if not os.environ.get("MARK_WEB_PASSWORD"):
         return jsonify({"error": "Acesso em configuração."}), 503
@@ -99,6 +99,30 @@ def home():
 @app.get("/healthz")
 def healthz():
     return jsonify({"ok": True, "app": "Mark Shaney BR"})
+
+
+@app.get('/manifest.webmanifest')
+def manifest():
+    return send_from_directory(BASE_DIR / 'static', 'manifest.webmanifest', mimetype='application/manifest+json')
+
+
+@app.get('/sw.js')
+def service_worker():
+    response = send_from_directory(BASE_DIR / 'static', 'sw.js', mimetype='text/javascript')
+    response.headers['Service-Worker-Allowed'] = '/'
+    return response
+
+
+@app.get('/icons/<path:filename>')
+def app_icon(filename):
+    if filename not in {'icon-192.png', 'icon-512.png', 'mark.svg'}:
+        return jsonify({'error': 'Ícone não encontrado.'}), 404
+    return send_from_directory(BASE_DIR / 'static' / 'icons', filename)
+
+
+@app.get('/favicon.ico')
+def favicon():
+    return send_from_directory(BASE_DIR / 'static' / 'icons', 'icon-192.png', mimetype='image/png')
 
 
 @app.get("/api/status")

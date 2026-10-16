@@ -270,6 +270,31 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertNotIn('reply', result.get_json())
         self.assertIn('indisponíveis', result.get_json()['error'])
 
+    def test_pwa_manifest_icons_install_button_and_no_private_cache(self):
+        from PIL import Image
+        manifest = web.app.test_client().get('/manifest.webmanifest')
+        self.assertEqual(manifest.status_code, 200)
+        config = json.loads(manifest.data)
+        self.assertEqual(config['display'], 'standalone')
+        self.assertEqual(config['start_url'], '/')
+        manifest.close()
+        for size in (192, 512):
+            icon = web.app.test_client().get(f'/icons/icon-{size}.png')
+            self.assertEqual(icon.status_code, 200)
+            self.assertEqual(Image.open(io.BytesIO(icon.data)).size, (size, size))
+            icon.close()
+        worker = web.app.test_client().get('/sw.js')
+        self.assertEqual(worker.status_code, 200)
+        self.assertNotIn('caches.open', worker.get_data(as_text=True))
+        worker.close()
+        self.assertEqual(web.app.test_client().get('/icons/../../app.py').status_code, 404)
+        page = self.client.get('/')
+        html = page.get_data(as_text=True)
+        self.assertIn('id="install"', html)
+        self.assertIn('beforeinstallprompt', html)
+        self.assertIn('/manifest.webmanifest', html)
+        page.close()
+
 
 if __name__ == "__main__":
     unittest.main()

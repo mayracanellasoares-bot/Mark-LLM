@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f7f5">
   <meta name="description" content="Mark Shaney BR — oficina literária e pesquisa com fontes.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Mark Shaney BR</title>
   <style>
     :root {
@@ -38,6 +42,10 @@
     .header-actions { display: flex; align-items: center; gap: 8px; }
     .logout { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: white; cursor: pointer; font-size: 12px; }
     .logout:hover { color: var(--ink); background: var(--soft); }
+    .install { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--accent-dark); background: white; cursor: pointer; font-size: 12px; white-space: nowrap; }
+    .install:hover { background: var(--soft); }
+    .install svg { width: 17px; height: 17px; }
+    .install[hidden] { display: none; }
     .dot { width: 7px; height: 7px; border-radius: 50%; background: #c18c48; }
     .status.active .dot { background: #4d9a68; }
     .panel { flex: 1; min-height: min(70vh, 720px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--paper); box-shadow: var(--shadow); }
@@ -82,7 +90,9 @@
       .mark { width: 38px; height: 38px; border-radius: 13px; }
       .brand h1 { font-size: 16px; }
       .brand p { font-size: 11px; }
-      .status { padding: 6px 8px; font-size: 10px; }
+      .status { display: none; }
+      .install span { display: none; }
+      .install { padding: 8px; }
       .panel { min-height: calc(100dvh - 76px); border-radius: 19px; }
       .messages { padding: 18px 14px; }
       .welcome { margin: 9vh auto 22px; }
@@ -102,6 +112,10 @@
       </div>
       <div class="header-actions">
         <div class="status" id="status"><span class="dot"></span><span id="statusText">Conectando…</span></div>
+        <button class="install" id="install" type="button" aria-label="Instalar aplicativo" title="Instalar aplicativo">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v11m0 0 4-4m-4 4-4-4M4 16v4h16v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Instalar</span>
+        </button>
         <form method="post" action="/logout"><button class="logout" type="submit">Sair</button></form>
       </div>
     </header>
@@ -151,6 +165,35 @@
     const welcome = document.querySelector('#welcome');
     const mode = document.querySelector('#mode');
     const webSearch = document.querySelector('#web');
+    const installButton = document.querySelector('#install');
+    let installPrompt = null;
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    }
+    if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+      installButton.hidden = true;
+    }
+    window.addEventListener('beforeinstallprompt', event => {
+      event.preventDefault();
+      installPrompt = event;
+      installButton.hidden = false;
+    });
+    window.addEventListener('appinstalled', () => {
+      installPrompt = null;
+      installButton.hidden = true;
+    });
+    installButton.addEventListener('click', async () => {
+      if (installPrompt) {
+        const prompt = installPrompt;
+        installPrompt = null;
+        await prompt.prompt();
+        return;
+      }
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      alert(isIOS ? 'Toque em Compartilhar e depois em “Adicionar à Tela de Início”.' :
+        'No menu do navegador (⋮), escolha “Instalar app” ou “Adicionar à tela inicial”.');
+    });
 
     function addMessage(role, text, extraClass = '') {
       welcome.classList.add('hidden');

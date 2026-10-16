@@ -57,3 +57,5 @@ Após uma resposta, use **Baixar DOCX**, **Baixar XLSX** ou **Baixar PDF**. A pl
 
 Respostas curtas que apenas pedem para reformular a pergunta recebem uma nova tentativa com instrução para responder à interpretação mais provável; se necessário, a outra API é tentada. Respostas de erro das duas APIs retornam HTTP 503, sem gravar uma falsa resposta na conversa. O texto remove marcadores de ênfase com asteriscos, preservando blocos e trechos de código entre crases.
 
+O site é instalável como PWA: `manifest.webmanifest` aponta para ícones PNG de 192 e 512 pixels, e o botão **Instalar** abre o aviso nativo quando o navegador o oferece. No Android ou iOS sem aviso nativo, o botão mostra o caminho para adicionar à tela inicial. O service worker não armazena conversas, respostas nem credenciais; é necessário estar online e fazer login para usar o app instalado.
+

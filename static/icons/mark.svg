@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mark Shaney BR">
+  <rect width="512" height="512" rx="112" fill="#294a3c"/>
+  <path d="M96 120q78-28 160 18 82-46 160-18v267q-79-24-160 21-81-45-160-21z" fill="#f4f3e9"/>
+  <path d="M256 138v270" fill="none" stroke="#9ab2a4" stroke-width="9"/>
+  <path d="M139 322V171h23l45 65 45-65h22v151h-29v-98l-38 54-39-54v98z" fill="#294a3c"/>
+  <path d="M312 192h62M312 227h62M312 262h47" fill="none" stroke="#9ab2a4" stroke-linecap="round" stroke-width="12"/>
+</svg>
