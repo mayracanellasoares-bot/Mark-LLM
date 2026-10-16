@@ -55,12 +55,9 @@
     .message.user .avatar { display: none; }
     .composer-wrap { padding: 0 clamp(14px, 3vw, 28px) 20px; }
     .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-    .model-switcher { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
     .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
     .mode-picker { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
     .mode-picker select { padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: #fff; }
-    .model-switcher[hidden] { display: none; }
-    .model-switcher select { max-width: min(100%, 320px); padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: #fff; }
     .chip { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: #555a54; background: #fff; cursor: pointer; font-size: 12px; transition: background .15s, border-color .15s; }
     .chip:hover { background: var(--soft); border-color: #d5d8d1; }
     .web-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; color: var(--muted); font-size: 12px; }
@@ -101,7 +98,7 @@
     <header>
       <div class="brand">
         <div class="mark" aria-hidden="true">M</div>
-        <div><h1>Mark Shaney BR</h1><p>Oficina literária e pesquisa com fontes</p></div>
+        <div><h1>Mark Shaney BR</h1><p>Desenvolvido pela Brittech Inc · tecnologia brasileira</p></div>
       </div>
       <div class="header-actions">
         <div class="status" id="status"><span class="dot"></span><span id="statusText">Conectando…</span></div>
@@ -113,15 +110,11 @@
         <div class="welcome" id="welcome">
           <div class="welcome-mark" aria-hidden="true">M</div>
           <h2>O que vamos pesquisar ou escrever?</h2>
-          <p>Pesquise na web, crie textos e baixe as respostas em Word, planilha ou PDF.</p>
+          <p>Literatura, língua portuguesa, ciências humanas e exatas e direito brasileiro. Pesquise fontes atuais e baixe as respostas em Word, planilha ou PDF.</p>
         </div>
       </div>
       <div class="composer-wrap">
         <div class="controls">
-          <div class="model-switcher" id="modelSwitcher" hidden>
-            <label for="provider">Modelo</label>
-            <select id="provider" aria-label="Modelo de IA"></select>
-          </div>
           <div class="mode-picker">
             <label for="mode">Resposta</label>
             <select id="mode" aria-label="Modo de resposta">
@@ -146,7 +139,7 @@
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 19V5m0 0 6 6m-6-6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </form>
-        <p class="footnote">A memória é separada por navegador. Sem LLM configurada, o bot pesquisa trechos e oferece roteiros de escrita.</p>
+        <p class="footnote">Memória separada por navegador. Para leis e decisões recentes, mantenha a pesquisa na internet ligada e confira os links citados.</p>
       </div>
     </section>
   </main>
@@ -156,15 +149,8 @@
     const messages = document.querySelector('#messages');
     const send = document.querySelector('#send');
     const welcome = document.querySelector('#welcome');
-    const provider = document.querySelector('#provider');
     const mode = document.querySelector('#mode');
     const webSearch = document.querySelector('#web');
-
-    function updateModelStatus() {
-      const option = provider.selectedOptions[0];
-      if (option) document.querySelector('#statusText').textContent = `LLM ativa · ${option.dataset.model}`;
-    }
-    provider.addEventListener('change', updateModelStatus);
 
     function addMessage(role, text, extraClass = '') {
       welcome.classList.add('hidden');
@@ -228,19 +214,14 @@
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, provider: provider.value || null, web: webSearch.checked, mode: mode.value })
+          body: JSON.stringify({ message, web: webSearch.checked, mode: mode.value })
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Não foi possível concluir o pedido.');
         pending.querySelector('.bubble').textContent = data.reply;
-        if (data.model) {
-          const used = document.createElement('small');
-          used.textContent = `\n\nModelo: ${data.model} · ${({'fast': 'Rápido', 'balanced': 'Equilibrado', 'thinking': 'Pensamento'})[data.mode] || 'Equilibrado'}`;
-          pending.querySelector('.bubble').append(used);
-        }
         if (data.provider_issues?.length) {
           const detail = document.createElement('small');
-          detail.textContent = `\n\nProvedor alternativo usado. ${data.provider_issues.join('; ')}`;
+          detail.textContent = `\n\nA conexão principal precisou de uma alternativa. ${data.provider_issues.join('; ')}`;
           pending.querySelector('.bubble').append(detail);
         }
         addExportActions(pending, data.reply);
@@ -280,18 +261,9 @@
     fetch('/api/status').then(response => response.json()).then(data => {
       const status = document.querySelector('#status');
       const label = document.querySelector('#statusText');
-      if (data.llm_enabled && Array.isArray(data.providers) && data.providers.length) {
-        for (const item of data.providers) {
-          const option = document.createElement('option');
-          option.value = item.id;
-          option.dataset.model = item.model;
-          option.textContent = `${item.label} · ${item.model}`;
-          provider.append(option);
-        }
-        provider.value = data.default_provider || data.providers[0].id;
-        document.querySelector('#modelSwitcher').hidden = false;
+      if (data.llm_enabled) {
         status.classList.add('active');
-        updateModelStatus();
+        label.textContent = 'Pronto para responder';
       } else {
         label.textContent = 'Pesquisa e memória locais';
       }

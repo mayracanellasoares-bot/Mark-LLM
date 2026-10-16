@@ -52,13 +52,14 @@ class ProviderRoutingTests(unittest.TestCase):
         visitor.post("/logout")
         self.assertEqual(visitor.get("/api/status").status_code, 401)
 
-    def test_status_lists_models_without_credentials(self):
+    def test_status_hides_model_names_and_reports_domains(self):
         response = self.client.get("/api/status")
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
-        self.assertEqual(data["default_provider"], "primary")
-        self.assertEqual([item["id"] for item in data["providers"]], ["primary", "mandapi"])
-        self.assertEqual(data["providers"][1]["model"], "deepseek-v4-flash")
+        self.assertTrue(data['llm_enabled'])
+        self.assertIn('direito brasileiro', data['knowledge_areas'])
+        self.assertNotIn('model', data)
+        self.assertNotIn('providers', data)
         self.assertNotIn("test-mandapi", response.get_data(as_text=True))
         self.assertNotIn("test-maritaca", response.get_data(as_text=True))
 
@@ -75,7 +76,7 @@ class ProviderRoutingTests(unittest.TestCase):
 
         self.assertEqual(mandapi.status_code, 200)
         self.assertEqual(primary.status_code, 200)
-        self.assertEqual(mandapi.get_json()["model"], "deepseek-v4-flash")
+        self.assertNotIn('model', mandapi.get_json())
         self.assertEqual(calls[0][0:2], ("https://api.mandapi.com/v1/chat/completions", "Bearer test-mandapi"))
         self.assertEqual(calls[0][2]["model"], "deepseek-v4-flash")
         self.assertEqual(calls[1][0:2], ("https://chat.maritaca.ai/api/chat/completions", "Bearer test-maritaca"))
@@ -90,9 +91,8 @@ class ProviderRoutingTests(unittest.TestCase):
     def test_mandapi_alone_uses_documented_defaults(self):
         with mock.patch.dict(os.environ, {"MANDAPI_API_KEY": "test-mandapi", "MARK_WEB_PASSWORD": "test-password"}, clear=True):
             status = self.client.get("/api/status").get_json()
-            self.assertEqual(status["default_provider"], "mandapi")
-            self.assertEqual(status["model"], "deepseek-v4-flash")
-            self.assertEqual([item["id"] for item in status["providers"]], ["mandapi"])
+            self.assertTrue(status['llm_enabled'])
+            self.assertNotIn('model', status)
 
     def test_web_search_uses_maritaca_and_passes_evidence_to_mandapi(self):
         calls = []
@@ -123,7 +123,7 @@ class ProviderRoutingTests(unittest.TestCase):
 
         with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
             response = self.client.post('/api/chat', json={'message': 'Olá', 'provider': 'mandapi'})
-        self.assertEqual(response.get_json()['provider'], 'primary')
+        self.assertEqual(response.get_json()['reply'], 'Resposta reserva')
         self.assertEqual(len(calls), 2)
 
     def test_export_files_are_real_and_login_protected(self):
@@ -151,7 +151,7 @@ class ProviderRoutingTests(unittest.TestCase):
                 self.assertEqual(response.get_json()['mode'], mode)
         self.assertEqual([call['max_tokens'] for call in calls], [700, 2048, 4096])
         self.assertEqual([call['model'] for call in calls], ['sabia-4', 'sabia-4', 'sabia-4-thinking'])
-        self.assertEqual(response.get_json()['model'], 'sabia-4-thinking')
+        self.assertNotIn('model', response.get_json())
         self.assertIn('sem expor raciocínio interno', calls[-1]['messages'][0]['content'])
 
     def test_mandapi_thinking_keeps_its_model_and_mode_validation(self):
@@ -163,7 +163,7 @@ class ProviderRoutingTests(unittest.TestCase):
 
         with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
             result = self.client.post('/api/chat', json={'message': 'Calcule', 'provider': 'mandapi', 'mode': 'thinking'})
-        self.assertEqual(result.get_json()['model'], 'deepseek-v4-flash')
+        self.assertNotIn('model', result.get_json())
         self.assertEqual(calls[0]['max_tokens'], 4096)
         self.assertEqual(calls[0]['model'], 'deepseek-v4-flash')
         self.assertEqual(self.client.post('/api/chat', json={'message': 'Olá', 'mode': 'desconhecido'}).status_code, 400)
@@ -179,9 +179,49 @@ class ProviderRoutingTests(unittest.TestCase):
 
         with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
             result = self.client.post('/api/chat', json={'message': 'Pense', 'provider': 'primary', 'mode': 'thinking'})
-        self.assertEqual(result.get_json()['provider'], 'mandapi')
-        self.assertEqual(result.get_json()['model'], 'deepseek-v4-flash')
-        self.assertEqual(result.get_json()['provider_issues'], ['Maritaca: HTTP 429'])
+        self.assertEqual(result.get_json()['reply'], 'Reserva')
+        self.assertNotIn('provider', result.get_json())
+        self.assertEqual(result.get_json()['provider_issues'], ['Serviço de resposta: HTTP 429'])
+
+    def test_topic_source_guides_and_legal_freshness_warning(self):
+        from knowledge_sources import assunto, guia
+        self.assertEqual(assunto('Qual a interpretação da CLT no TST?'), 'juridico')
+        self.assertEqual(assunto('Dúvida de crase'), 'gramatica')
+        self.assertEqual(assunto('Romance de Machado de Assis'), 'literatura')
+        self.assertEqual(assunto('Geografia e população'), 'humanas')
+        self.assertEqual(assunto('Cálculo de uma equação'), 'exatas')
+        self.assertIn('planalto.gov.br', guia('Lei 13.467')[1])
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(json.loads(request.data))
+            return io.BytesIO(json.dumps({'choices': [{'message': {'content': 'Resposta'}}]}).encode())
+
+        with mock.patch('urllib.request.urlopen', side_effect=fake_urlopen):
+            no_web = self.client.post('/api/chat', json={'message': 'A lei 13.467 continua vigente?', 'web': False})
+            with_web = self.client.post('/api/chat', json={'message': 'A lei 13.467 continua vigente?', 'web': True})
+            help_reply = self.client.post('/api/chat', json={'message': '/ajuda'})
+            status_reply = self.client.post('/api/chat', json={'message': '/status'})
+        self.assertIn('não foram verificados', no_web.get_json()['reply'])
+        self.assertNotIn('não foram verificados', with_web.get_json()['reply'])
+        self.assertIn('planalto.gov.br', calls[0]['messages'][0]['content'])
+        self.assertTrue(calls[1]['web_search'])
+        self.assertIn('Brittech Inc', calls[0]['messages'][0]['content'])
+        self.assertIn('Brittech Inc', help_reply.get_json()['reply'])
+        for response in (help_reply, status_reply):
+            self.assertNotIn('sabia-4', response.get_json()['reply'])
+
+    def test_visible_pages_credit_brittech_without_model_selector(self):
+        response = self.client.get('/')
+        page = response.get_data(as_text=True)
+        self.assertIn('Brittech Inc', page)
+        self.assertNotIn('modelSwitcher', page)
+        self.assertNotIn('Modelo:', page)
+        response.close()
+        visitor = web.app.test_client()
+        login = visitor.get('/login')
+        self.assertIn('Brittech Inc', login.get_data(as_text=True))
+        login.close()
 
     def test_spreadsheet_export_does_not_execute_untrusted_formulas(self):
         from openpyxl import load_workbook

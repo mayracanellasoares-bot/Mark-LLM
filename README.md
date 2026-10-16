@@ -1,6 +1,6 @@
 # Mark Shaney BR
 
-Oficina literária e pesquisa em português, construída sobre o projeto Mark Shaney BR 2.0.
+Assistente de pesquisa em português desenvolvido pela Brittech Inc, empresa de tecnologia brasileira.
 
 ## Rodar localmente
 
@@ -29,13 +29,13 @@ Sem configurar uma LLM, a pesquisa e a recuperação de trechos continuam dispon
 - `MARK_API_KEY` como segredo, quando o provedor exigir chave; para Maritaca, a variável `MARITACA_API_KEY` também é aceita
 - `FLASK_SECRET_KEY` com um segredo aleatório para assinar a sessão
 
-Para adicionar a MandAPI com DeepSeek V4 Flash como segunda opção no seletor do chat:
+Para adicionar a MandAPI como alternativa interna:
 
 - `MANDAPI_API_KEY` com a chave da MandAPI (segredo)
 - `MARK_BASE_URL2=https://api.mandapi.com/v1`
 - `MARK_MODEL2=deepseek-v4-flash`
 
-Se apenas a MandAPI estiver configurada, ela vira o modelo padrão. As chaves ficam no servidor; `/api/status` expõe apenas os nomes e IDs dos modelos. O campo `provider` de `/api/chat` aceita `primary` ou `mandapi` quando disponíveis.
+Se apenas a MandAPI estiver configurada, ela vira o provedor padrão. As chaves ficam no servidor; `/api/status` e `/api/chat` não mostram nomes de modelos. O campo opcional `provider` de `/api/chat` continua aceitando `primary` ou `mandapi` para compatibilidade de clientes existentes; a interface não apresenta esse seletor.
 
 Não coloque chaves no repositório. O serviço mantém uma base SQLite separada por navegador. No plano gratuito do Render, o disco é efêmero; a memória pode ser perdida quando a instância reiniciar ou for redeployada.
 O login protege o site, `/api/status` e `/api/chat`; apenas `/healthz` permanece público para o monitoramento do Render. Use o botão **Sair** para encerrar a sessão.
@@ -47,9 +47,11 @@ Use `/ajuda` para ver os comandos. Entre eles: `/wiki tema`, `/wikisource títul
 
 Configure `MARK_WEB_USER` e `MARK_WEB_PASSWORD` no Render, além de `FLASK_SECRET_KEY` com um valor aleatório persistente. A página inicial, os arquivos estáticos e as APIs de conversa e exportação exigem login; `/healthz` permanece público para monitoramento.
 
-No chat, marque **Pesquisar na internet nesta resposta** para usar a busca na web do Sabiá-4. Se selecionar MandAPI, a Maritaca faz a pesquisa e o resumo das fontes é enviado ao DeepSeek V4 Flash. A pesquisa depende de ambas as APIs, pode ter custo e mostra um aviso quando não fica disponível. Se a API da resposta falhar, o app tenta o outro modelo configurado. Sem as duas APIs operantes, não é possível garantir uma resposta.
+No chat, **Pesquisar na internet nesta resposta** começa marcado. A pesquisa usa o provedor principal; quando a alternativa está em uso, as evidências pesquisadas são passadas para a resposta. A pesquisa pode ter custo e mostra aviso quando não fica disponível. Se uma API de resposta falhar, o app tenta a outra configurada.
+
+O arquivo `knowledge_sources.py` traz um índice versionado de portais para literatura, gramática, ciências humanas e exatas e direito brasileiro. Isso orienta pesquisas em tempo de uso; os links não são um corpus completo nem prova de leitura. Para perguntas jurídicas, as instruções pedem norma vigente, decisões com órgão/data e distinção entre texto legal, interpretação e aplicação. Sem pesquisa atual, a resposta traz aviso de que leis e precedentes não foram verificados. A memória SQLite por navegador permite guardar informações aprovadas, mas é efêmera no plano gratuito do Render; para conhecimento próprio durável, conecte armazenamento persistente.
 
 Após uma resposta, use **Baixar DOCX**, **Baixar XLSX** ou **Baixar PDF**. A planilha converte tabelas Markdown ou linhas CSV em células; outros textos ficam em uma coluna. Os arquivos são gerados na hora, sem armazenamento no servidor.
 
-**Modos de resposta:** Rápido usa respostas mais curtas (até 700 tokens); Equilibrado usa até 2048; Pensamento usa até 4096 e instruções de verificação. Com Maritaca, Pensamento troca para `sabia-4-thinking` (personalizável por `MARK_THINKING_MODEL`). Com MandAPI, continua `deepseek-v4-flash` com instruções mais cuidadosas; o app informa o modelo efetivo na resposta. A opção de pesquisa na internet é independente do modo, mas aumenta o tempo de resposta e o uso da API.
+**Modos de resposta:** Rápido usa respostas mais curtas (até 700 tokens); Equilibrado usa até 2048; Pensamento usa até 4096 e instruções de verificação. Internamente, o modo Pensamento usa `sabia-4-thinking` no provedor principal (configurável por `MARK_THINKING_MODEL`). Na alternativa, continua `deepseek-v4-flash` com instruções mais cuidadosas. A pesquisa na internet é independente do modo e aumenta o tempo de resposta e o uso da API.
 

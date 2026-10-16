@@ -106,7 +106,6 @@ def status():
     bot, _ = _new_bot()
     try:
         providers = provedores_llm()
-        default_provider = next(iter(providers), None)
         documents = bot.memoria.db.execute(
             "SELECT COUNT(*) FROM documentos"
         ).fetchone()[0]
@@ -115,12 +114,7 @@ def status():
         ).fetchone()[0]
         return jsonify({
             "llm_enabled": bool(providers),
-            "model": providers[default_provider]["model"] if default_provider else None,
-            "default_provider": default_provider,
-            "providers": [
-                {"id": provider_id, "label": config["label"], "model": config["model"]}
-                for provider_id, config in providers.items()
-            ],
+            "knowledge_areas": ["literatura", "gramática", "ciências humanas", "ciências exatas", "direito brasileiro"],
             "documents": documents,
             "corrections": corrections,
         })
@@ -162,8 +156,6 @@ def chat():
         return jsonify({
             "reply": reply,
             "llm_enabled": bool(providers),
-            "model": bot.last_model,
-            "provider": bot.last_provider,
             "mode": mode,
             "web_used": bot.web_used,
             "provider_issues": bot.provider_issues,
