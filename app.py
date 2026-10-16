@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
 from datetime import timedelta
 from pathlib import Path
@@ -138,12 +139,41 @@ def status():
         ).fetchone()[0]
         return jsonify({
             "llm_enabled": bool(providers),
+            "conversation_id": bot.sessao,
             "knowledge_areas": ["literatura", "gramática", "ciências humanas", "ciências exatas", "direito brasileiro"],
             "documents": documents,
             "corrections": corrections,
         })
     finally:
         bot.memoria.fechar()
+
+
+@app.get('/api/conversation/current')
+def current_conversation():
+    bot, conversation_id = _new_bot()
+    try:
+        rows = bot.memoria.db.execute(
+            'SELECT pedido,resposta FROM conversas WHERE sessao=? ORDER BY id DESC LIMIT 40',
+            (conversation_id,),
+        ).fetchall()
+        messages = []
+        for row in reversed(rows):
+            messages.extend([{'role': 'user', 'content': row['pedido']},
+                             {'role': 'assistant', 'content': row['resposta']}])
+        return jsonify({'conversation_id': conversation_id, 'messages': messages})
+    finally:
+        bot.memoria.fechar()
+
+
+@app.post('/api/conversation/select')
+def select_conversation():
+    body = request.get_json(silent=True)
+    conversation_id = body.get('conversation_id') if isinstance(body, dict) else None
+    if not isinstance(conversation_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', conversation_id):
+        return jsonify({'error': 'Conversa inválida.'}), 400
+    _session_ids()
+    session['conversation_id'] = conversation_id
+    return jsonify({'conversation_id': conversation_id})
 
 
 @app.post("/api/chat")
@@ -171,9 +201,19 @@ def chat():
     mode = body.get('mode', 'balanced')
     if mode not in ('fast', 'balanced', 'thinking'):
         return jsonify({'error': 'Modo de resposta inválido.'}), 400
+    history = body.get('history')
+    if history is not None:
+        if (not isinstance(history, list) or len(history) > 8
+                or any(not isinstance(item, dict)
+                       or item.get('role') not in ('user', 'assistant')
+                       or not isinstance(item.get('content'), str)
+                       or len(item['content']) > 3000 for item in history)
+                or sum(len(item['content']) for item in history) > 16000):
+            return jsonify({'error': 'Histórico inválido.'}), 400
 
     bot, _ = _new_bot()
     try:
+        bot.client_history = history
         reply = bot.executar(message, provider=selected, web=web, mode=mode)
         if bot.last_error:
             return jsonify({"error": reply, "retryable": False}), (400 if message.startswith('/') else 503)
@@ -181,6 +221,7 @@ def chat():
             session["conversation_id"] = bot.sessao
         return jsonify({
             "reply": reply,
+            "conversation_id": bot.sessao,
             "llm_enabled": bool(providers),
             "mode": mode,
             "web_used": bot.web_used,

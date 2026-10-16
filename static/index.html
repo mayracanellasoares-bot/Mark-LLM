@@ -32,7 +32,18 @@
       font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     button, textarea, select { font: inherit; }
+    .app-layout { display: flex; max-width: 1280px; min-height: 100vh; margin: 0 auto; }
+    .sidebar { width: 260px; flex: 0 0 260px; height: 100vh; position: sticky; top: 0; display: flex; flex-direction: column; padding: 22px 14px; border-right: 1px solid var(--line); background: #f1f3ef; }
+    .sidebar-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 6px 18px; font: 600 17px Georgia, serif; }
+    .new-chat { width: 100%; border: 1px solid #cbd8ce; border-radius: 12px; background: white; padding: 10px; color: var(--accent-dark); cursor: pointer; text-align: left; }
+    .conversation-list { flex: 1; overflow-y: auto; margin-top: 14px; display: flex; flex-direction: column; gap: 5px; }
+    .conversation-item { width: 100%; border: 0; border-radius: 10px; padding: 10px; background: transparent; color: var(--ink); cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-item:hover, .conversation-item.active { background: #e2eae2; }
+    .storage-note { color: var(--muted); font-size: 11px; line-height: 1.4; padding: 10px 6px 0; }
+    .menu-toggle, .sidebar-close { display: none; border: 0; background: transparent; color: var(--ink); cursor: pointer; font-size: 23px; }
+    .sidebar-backdrop { display: none; }
     .shell { max-width: 980px; min-height: 100vh; margin: 0 auto; padding: 22px 22px 18px; display: flex; flex-direction: column; }
+    .app-layout > .shell { flex: 1; min-width: 0; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 4px 2px 20px; }
     .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
     .mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 15px; background: var(--accent); color: white; font-family: Georgia, serif; font-size: 23px; box-shadow: 0 5px 14px rgba(59, 102, 85, .18); }
@@ -83,6 +94,12 @@
     .footnote { margin: 9px 4px 0; color: #92958e; text-align: center; font-size: 11px; }
     .typing { color: var(--muted); font-size: 13px; }
     .hidden { display: none; }
+    @media (max-width: 800px) {
+      .sidebar { position: fixed; left: 0; z-index: 30; transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow); }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-backdrop.open { display: block; position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.3); }
+      .menu-toggle, .sidebar-close { display: inline-block; }
+    }
     @media (max-width: 600px) {
       .shell { padding: 12px 10px 10px; }
       header { padding: 5px 3px 14px; }
@@ -104,9 +121,18 @@
   </style>
 </head>
 <body>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+  <div class="app-layout">
+  <aside class="sidebar" id="sidebar" aria-label="Conversas salvas">
+    <div class="sidebar-head"><span>Conversas</span><button class="sidebar-close" id="sidebarClose" type="button" aria-label="Fechar conversas">×</button></div>
+    <button class="new-chat" id="newChat" type="button">＋ Nova conversa</button>
+    <nav class="conversation-list" id="conversationList" aria-label="Histórico de conversas"></nav>
+    <p class="storage-note" id="storageNote">Salvas neste navegador. Se você apagar os dados do site, o histórico será removido.</p>
+  </aside>
   <main class="shell">
     <header>
       <div class="brand">
+        <button class="menu-toggle" id="menuToggle" type="button" aria-label="Abrir conversas">☰</button>
         <div class="mark" aria-hidden="true">M</div>
         <div><h1>Mark Shaney BR</h1><p>Desenvolvido pela Brittech Inc · tecnologia brasileira</p></div>
       </div>
@@ -157,6 +183,7 @@
       </div>
     </section>
   </main>
+  </div>
   <script>
     const form = document.querySelector('#form');
     const input = document.querySelector('#input');
@@ -166,6 +193,13 @@
     const mode = document.querySelector('#mode');
     const webSearch = document.querySelector('#web');
     const installButton = document.querySelector('#install');
+    const sidebar = document.querySelector('#sidebar');
+    const sidebarBackdrop = document.querySelector('#sidebarBackdrop');
+    const conversationList = document.querySelector('#conversationList');
+    const storageNote = document.querySelector('#storageNote');
+    let activeConversation = null;
+    let historyDb = null;
+    send.disabled = true;
     let installPrompt = null;
 
     if ('serviceWorker' in navigator) {
@@ -194,6 +228,127 @@
       alert(isIOS ? 'Toque em Compartilhar e depois em “Adicionar à Tela de Início”.' :
         'No menu do navegador (⋮), escolha “Instalar app” ou “Adicionar à tela inicial”.');
     });
+
+    function openHistoryDb() {
+      return new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) return reject(new Error('Armazenamento indisponível'));
+        const request = indexedDB.open('mark-shaney-conversations', 1);
+        request.onupgradeneeded = () => request.result.createObjectStore('conversations', { keyPath: 'id' });
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function historyRequest(method, value) {
+      return new Promise((resolve, reject) => {
+        if (!historyDb) return resolve(method === 'getAll' ? [] : null);
+        const transaction = historyDb.transaction('conversations', method === 'put' ? 'readwrite' : 'readonly');
+        const store = transaction.objectStore('conversations');
+        const request = method === 'put' ? store.put(value) : method === 'get' ? store.get(value) : store.getAll();
+        if (method === 'put') transaction.oncomplete = () => resolve(value);
+        else request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    async function saveConversation() {
+      if (!activeConversation) return;
+      activeConversation.updated = Date.now();
+      try {
+        await historyRequest('put', activeConversation);
+        await renderConversationList();
+      } catch {
+        storageNote.textContent = 'Não foi possível salvar neste navegador. Verifique o espaço disponível.';
+      }
+    }
+
+    function closeSidebar() {
+      sidebar.classList.remove('open');
+      sidebarBackdrop.classList.remove('open');
+    }
+    document.querySelector('#menuToggle').addEventListener('click', () => {
+      sidebar.classList.add('open');
+      sidebarBackdrop.classList.add('open');
+    });
+    document.querySelector('#sidebarClose').addEventListener('click', closeSidebar);
+    sidebarBackdrop.addEventListener('click', closeSidebar);
+
+    async function selectConversation(conversation) {
+      if (send.disabled) return;
+      const response = await fetch('/api/conversation/select', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({conversation_id: conversation.id})
+      });
+      if (!response.ok) throw new Error('Não foi possível abrir a conversa.');
+      activeConversation = conversation;
+      try { localStorage.setItem('mark-active-conversation', conversation.id); } catch {}
+      renderConversation();
+      await renderConversationList();
+      closeSidebar();
+    }
+
+    async function renderConversationList() {
+      const all = await historyRequest('getAll');
+      all.sort((a, b) => b.updated - a.updated);
+      conversationList.replaceChildren();
+      for (const conversation of all) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'conversation-item' + (conversation.id === activeConversation?.id ? ' active' : '');
+        button.textContent = conversation.title || 'Nova conversa';
+        button.title = conversation.title || 'Nova conversa';
+        button.addEventListener('click', () => {
+          selectConversation(conversation).catch(error => { storageNote.textContent = error.message; });
+        });
+        conversationList.append(button);
+      }
+    }
+
+    function renderConversation() {
+      messages.querySelectorAll('.message').forEach(row => row.remove());
+      welcome.classList.toggle('hidden', !!activeConversation?.messages.length);
+      for (const item of activeConversation?.messages || []) {
+        addMessage(item.role, item.content);
+      }
+    }
+
+    async function newConversation() {
+      if (send.disabled) return;
+      const conversation = {id: crypto.randomUUID(), title: 'Nova conversa', updated: Date.now(), messages: []};
+      await selectConversation(conversation);
+      await saveConversation();
+      input.value = '';
+      input.focus();
+    }
+    document.querySelector('#newChat').addEventListener('click', () => {
+      newConversation().catch(error => { storageNote.textContent = error.message; });
+    });
+
+    async function initializeHistory(status) {
+      try { historyDb = await openHistoryDb(); }
+      catch { storageNote.textContent = 'Este navegador não permitiu salvar conversas. Verifique as permissões do site.'; }
+      let preferred = null;
+      try { preferred = localStorage.getItem('mark-active-conversation'); } catch {}
+      let conversation = preferred ? await historyRequest('get', preferred) : null;
+      if (conversation && conversation.id !== status.conversation_id) {
+        const response = await fetch('/api/conversation/select', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({conversation_id: conversation.id})
+        });
+        if (!response.ok) throw new Error('Falha ao recuperar a conversa.');
+      }
+      if (!conversation) {
+        const current = await fetch('/api/conversation/current').then(response => response.json());
+        conversation = {id: current.conversation_id, title: current.messages.find(item => item.role === 'user')?.content.slice(0, 48) || 'Nova conversa',
+          updated: Date.now(), messages: current.messages};
+      }
+      activeConversation = conversation;
+      try { localStorage.setItem('mark-active-conversation', conversation.id); } catch {}
+      renderConversation();
+      await saveConversation();
+      send.disabled = false;
+    }
 
     function addMessage(role, text, extraClass = '') {
       welcome.classList.add('hidden');
@@ -247,17 +402,35 @@
 
     async function submitMessage(text) {
       const message = text.trim();
-      if (!message || send.disabled) return;
+      if (!message || send.disabled || !activeConversation) return;
+      if (message === '/nova') {
+        await newConversation();
+        return;
+      }
+      const previous = [];
+      for (let i = 0; i + 1 < activeConversation.messages.length; i++) {
+        const first = activeConversation.messages[i];
+        const second = activeConversation.messages[i + 1];
+        if (first.role === 'user' && second.role === 'assistant') {
+          previous.push({role: 'user', content: first.content.slice(0, 2000)},
+            {role: 'assistant', content: second.content.slice(0, 3000)});
+          i++;
+        }
+      }
+      const history = previous.slice(-8);
       addMessage('user', message);
+      activeConversation.messages.push({role: 'user', content: message});
+      if (activeConversation.title === 'Nova conversa') activeConversation.title = message.slice(0, 48);
       input.value = '';
       input.style.height = 'auto';
       send.disabled = true;
       const pending = addMessage('assistant', 'Consultando…', 'typing');
       try {
+        await saveConversation();
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, web: webSearch.checked, mode: mode.value })
+          body: JSON.stringify({ message, web: webSearch.checked, mode: mode.value, history })
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
@@ -275,6 +448,8 @@
         }
         addExportActions(pending, data.reply);
         pending.classList.remove('typing');
+        activeConversation.messages.push({role: 'assistant', content: data.reply});
+        await saveConversation();
       } catch (error) {
         pending.querySelector('.bubble').textContent = `Erro: ${error.message}`;
         input.value = message;
@@ -308,7 +483,10 @@
       });
     });
 
-    fetch('/api/status').then(response => response.json()).then(data => {
+    fetch('/api/status').then(response => {
+      if (!response.ok) throw new Error('Não foi possível carregar a sessão.');
+      return response.json();
+    }).then(async data => {
       const status = document.querySelector('#status');
       const label = document.querySelector('#statusText');
       if (data.llm_enabled) {
@@ -317,8 +495,10 @@
       } else {
         label.textContent = 'Pesquisa e memória locais';
       }
+      await initializeHistory(data);
     }).catch(() => {
       document.querySelector('#statusText').textContent = 'Sem conexão com o servidor';
+      storageNote.textContent = 'Não foi possível abrir o histórico. Atualize a página.';
     });
   </script>
 </body>

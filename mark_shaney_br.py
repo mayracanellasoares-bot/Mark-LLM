@@ -398,6 +398,7 @@ class MarkVShaneyBR:
         self.web_used = False
         self.provider_issues = []
         self.last_error = False
+        self.client_history = None
 
     @staticmethod
     def issue(exc):
@@ -406,6 +407,9 @@ class MarkVShaneyBR:
         return type(exc).__name__
 
     def historico(self):
+        if self.client_history is not None:
+            return [{'role': item['role'], 'content': item['content']}
+                    for item in self.client_history if not (item['role'] == 'assistant' and resposta_insuficiente(item['content']))]
         rows = list(self.memoria.db.execute('SELECT pedido,resposta FROM conversas WHERE sessao=? ORDER BY id DESC LIMIT 4', (self.sessao,)))
         msgs = []
         for r in reversed(rows):

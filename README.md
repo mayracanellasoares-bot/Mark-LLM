@@ -59,3 +59,5 @@ Respostas curtas que apenas pedem para reformular a pergunta recebem uma nova te
 
 O site é instalável como PWA: `manifest.webmanifest` aponta para ícones PNG de 192 e 512 pixels, e o botão **Instalar** abre o aviso nativo quando o navegador o oferece. No Android ou iOS sem aviso nativo, o botão mostra o caminho para adicionar à tela inicial. O service worker não armazena conversas, respostas nem credenciais; é necessário estar online e fazer login para usar o app instalado.
 
+As conversas ficam no IndexedDB do navegador e aparecem na barra lateral. O identificador ativo é salvo no armazenamento local, e as últimas interações são enviadas no pedido para preservar contexto mesmo após o banco temporário do Render reiniciar. O histórico existente na sessão do servidor é importado quando ainda disponível. Os dados permanecem apenas no navegador onde foram criados; apagar os dados do site remove essa cópia. O service worker continua sem armazenar mensagens privadas em cache HTTP.
+
