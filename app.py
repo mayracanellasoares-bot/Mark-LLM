@@ -8,7 +8,7 @@ from pathlib import Path
 
 from flask import Flask, jsonify, request, send_from_directory, session
 
-from mark_shaney_br import MarkVShaneyBR
+from mark_shaney_br import MarkVShaneyBR, provedores_llm
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -62,6 +62,8 @@ def healthz():
 def status():
     bot, _ = _new_bot()
     try:
+        providers = provedores_llm()
+        default_provider = next(iter(providers), None)
         documents = bot.memoria.db.execute(
             "SELECT COUNT(*) FROM documentos"
         ).fetchone()[0]
@@ -69,8 +71,13 @@ def status():
             "SELECT COUNT(*) FROM correcoes"
         ).fetchone()[0]
         return jsonify({
-            "llm_enabled": bool(os.environ.get("MARK_LLM")),
-            "model": os.environ.get("MARK_MODEL") or None,
+            "llm_enabled": bool(providers),
+            "model": providers[default_provider]["model"] if default_provider else None,
+            "default_provider": default_provider,
+            "providers": [
+                {"id": provider_id, "label": config["label"], "model": config["model"]}
+                for provider_id, config in providers.items()
+            ],
             "documents": documents,
             "corrections": corrections,
         })
@@ -90,15 +97,24 @@ def chat():
     if len(message) > 12_000:
         return jsonify({"error": "A mensagem passou do limite de 12.000 caracteres."}), 413
 
+    providers = provedores_llm()
+    requested_provider = body.get("provider")
+    if requested_provider is not None and not isinstance(requested_provider, str):
+        return jsonify({"error": "Selecione um modelo válido."}), 400
+    selected = requested_provider or next(iter(providers), None)
+    if selected is not None and selected not in providers:
+        return jsonify({"error": "O modelo selecionado não está disponível."}), 400
+
     bot, _ = _new_bot()
     try:
-        reply = bot.executar(message)
+        reply = bot.executar(message, provider=selected)
         if message == "/nova":
             session["conversation_id"] = bot.sessao
         return jsonify({
             "reply": reply,
-            "llm_enabled": bool(os.environ.get("MARK_LLM")),
-            "model": os.environ.get("MARK_MODEL") or None,
+            "llm_enabled": bool(providers),
+            "model": providers[selected]["model"] if selected else None,
+            "provider": selected,
         })
     finally:
         bot.memoria.fechar()

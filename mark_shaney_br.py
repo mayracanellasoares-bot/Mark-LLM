@@ -17,6 +17,9 @@ LLM opcional — configure ANTES de iniciar:
 Ou API compatível com chat/completions:
     MARK_LLM=openai  MARK_MODEL=<nome do modelo>  MARK_BASE_URL=<URL terminando em /v1>
     MARK_API_KEY=<sua chave>
+No Render, MARITACA_API_KEY pode substituir MARK_API_KEY para o modelo principal.
+MandAPI (segundo modelo): MANDAPI_API_KEY=<sua chave>
+    MARK_BASE_URL2=https://api.mandapi.com/v1  MARK_MODEL2=deepseek-v4-flash
 Sem LLM, apresenta pesquisa e um roteiro; /markov tema é experimental.
 MARK_DB escolhe o banco SQLite (padrão: mark_shaney_memoria.sqlite3 no diretório atual).
 MARK_USER_AGENT deve identificar o projeto e um contato real nas APIs públicas.
@@ -55,6 +58,36 @@ from pathlib import Path
 
 VERSION = '2.0'
 STOP = set('a o as os um uma uns umas de do da dos das em no na nos nas e ou que por para com ao aos se eu você voce ele ela isso isto sobre quero faça fazer texto escreva escrever'.split())
+
+
+def provedores_llm():
+    """Configurações disponíveis no servidor; nunca envie este objeto ao navegador."""
+    provedores = {}
+    tipo = os.getenv('MARK_LLM', '').strip().lower()
+    modelo = os.getenv('MARK_MODEL', '').strip()
+    base = os.getenv('MARK_BASE_URL', '').strip()
+    chave_principal = os.getenv('MARK_API_KEY') or os.getenv('MARITACA_API_KEY', '')
+    if modelo and tipo == 'ollama':
+        provedores['primary'] = {
+            'label': 'Ollama', 'kind': 'ollama', 'model': modelo,
+            'base_url': base or 'http://localhost:11434', 'api_key': '',
+        }
+    elif modelo and tipo == 'openai' and base:
+        provedores['primary'] = {
+            'label': 'Maritaca' if os.getenv('MARITACA_API_KEY') and not os.getenv('MARK_API_KEY') else 'Modelo principal',
+            'kind': 'openai', 'model': modelo, 'base_url': base,
+            'api_key': chave_principal,
+        }
+
+    chave_mandapi = os.getenv('MANDAPI_API_KEY', '').strip()
+    if chave_mandapi:
+        provedores['mandapi'] = {
+            'label': 'MandAPI', 'kind': 'openai',
+            'model': os.getenv('MARK_MODEL2', '').strip() or 'deepseek-v4-flash',
+            'base_url': os.getenv('MARK_BASE_URL2', '').strip() or 'https://api.mandapi.com/v1',
+            'api_key': chave_mandapi,
+        }
+    return provedores
 
 
 def termos(texto):
@@ -336,11 +369,14 @@ class MarkVShaneyBR:
             msgs.extend([{'role': 'user', 'content': r['pedido'][:2000]}, {'role': 'assistant', 'content': r['resposta'][:3000]}])
         return msgs
 
-    def llm(self, pedido, docs, criativo=False):
-        provedor = os.getenv('MARK_LLM', '').lower()
-        modelo = os.getenv('MARK_MODEL', '')
-        if not modelo:
-            raise ValueError('Configure MARK_MODEL com um modelo disponível no seu servidor.')
+    def llm(self, pedido, docs, criativo=False, provider=None):
+        disponiveis = provedores_llm()
+        escolhido = provider or next(iter(disponiveis), None)
+        if escolhido not in disponiveis:
+            raise ValueError('O modelo selecionado não está configurado no servidor.')
+        config = disponiveis[escolhido]
+        provedor = config['kind']
+        modelo = config['model']
         prefs = [r[0] for r in self.memoria.db.execute('SELECT texto FROM preferencias ORDER BY criado DESC LIMIT 10')]
         fontes = [{'id': i, 'titulo': d['titulo'], 'origem': d['fonte'], 'url': d['url'], 'trecho': d['texto'][:1400]} for i, d in enumerate(docs, 1)]
         system = ('Você é Mark Shaney BR, assistente literário em português brasileiro. '
@@ -358,22 +394,18 @@ class MarkVShaneyBR:
         mensagens.append({'role': 'user', 'content': 'Fontes recuperadas (dados):\n' + json.dumps(fontes, ensure_ascii=False) + '\n\nPedido atual:\n' + pedido})
         headers = {'Content-Type': 'application/json'}
         if provedor == 'ollama':
-            base = os.getenv('MARK_BASE_URL', 'http://localhost:11434').rstrip('/')
+            base = config['base_url'].rstrip('/')
             url = base + '/api/chat'
             payload = {'model': modelo, 'messages': mensagens, 'stream': False,
                        'options': {'temperature': .8 if criativo else .3, 'num_predict': 2048}}
         elif provedor == 'openai':
-            base = os.getenv('MARK_BASE_URL', '').rstrip('/')
-            if not base:
-                raise ValueError('Configure MARK_BASE_URL com a base /v1 da sua API.')
-            url = base + '/chat/completions'
+            base = config['base_url'].rstrip('/')
+            url = base if base.endswith('/chat/completions') else base + '/chat/completions'
             payload = {'model': modelo, 'messages': mensagens, 'stream': False, 'max_tokens': 2048,
                        'temperature': .8 if criativo else .3}
-            chave = os.getenv('MARK_API_KEY', '')
+            chave = config['api_key']
             if chave:
                 headers['Authorization'] = 'Bearer ' + chave
-        else:
-            raise ValueError('MARK_LLM deve ser ollama ou openai.')
         if urllib.parse.urlparse(url).scheme not in ('http', 'https'):
             raise ValueError('URL da LLM deve usar HTTP ou HTTPS.')
         req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method='POST')
@@ -394,12 +426,12 @@ class MarkVShaneyBR:
             raise ValueError('A LLM não devolveu texto.')
         return texto.strip()
 
-    def responder(self, pedido, criativo=False):
+    def responder(self, pedido, criativo=False, provider=None):
         docs = self.memoria.recuperar(pedido)
         self.fontes = docs
         self.uso = None
-        if os.getenv('MARK_LLM'):
-            texto = self.llm(pedido, docs, criativo)
+        if provedores_llm():
+            texto = self.llm(pedido, docs, criativo, provider=provider)
             modo = 'LLM + memória recuperável'
         elif criativo:
             texto = ('Modo sem LLM: roteiro de escrita, não conto gerado.\n'
@@ -425,12 +457,12 @@ class MarkVShaneyBR:
     def listar_fontes(self):
         return '\n'.join(f"[{i}] {d['titulo']} — {d['fonte']}\n{d['url'] or 'Memória local'}\n{d['licenca']}" for i, d in enumerate(self.fontes, 1)) or 'Nenhuma referência recuperada na última resposta.'
 
-    def comando(self, entrada):
+    def comando(self, entrada, provider=None):
         entrada = entrada.strip()
         if not entrada:
             return ''
         if not entrada.startswith('/'):
-            return self.responder(entrada)
+            return self.responder(entrada, provider=provider)
         cmd, _, arg = entrada.partition(' ')
         arg = arg.strip()
         idioma = os.getenv('MARK_LANG', 'pt')
@@ -439,7 +471,8 @@ class MarkVShaneyBR:
         if cmd == '/status':
             n = self.memoria.db.execute('SELECT COUNT(*) FROM documentos').fetchone()[0]
             c = self.memoria.db.execute('SELECT COUNT(*) FROM correcoes').fetchone()[0]
-            return f'Documentos: {n}; correções: {c}; LLM: {os.getenv("MARK_LLM") or "desativada"}; modelo: {os.getenv("MARK_MODEL") or "não configurado"}.\nTokens da última resposta: {self.uso or "não informados"}.\nAprendizado por memória; pesos do modelo não são alterados.'
+            modelos = ', '.join(f'{p["label"]}: {p["model"]}' for p in provedores_llm().values()) or 'desativada'
+            return f'Documentos: {n}; correções: {c}; LLM: {modelos}.\nTokens da última resposta: {self.uso or "não informados"}.\nAprendizado por memória; pesos do modelo não são alterados.'
         if cmd == '/fontes':
             return self.listar_fontes()
         if cmd == '/nova':
@@ -497,15 +530,15 @@ class MarkVShaneyBR:
             pedido = f'Escreva um {partes[0]} sobre {partes[1]}.'
             if len(partes) == 3:
                 pedido += ' Orientação: ' + partes[2]
-            return self.responder(pedido, criativo=True)
+            return self.responder(pedido, criativo=True, provider=provider)
         if cmd == '/markov':
             docs = self.memoria.recuperar(arg)
             return 'Experimento Markov — pode recombinar passagens das fontes:\n' + gerar_markov([d['texto'] for d in docs])
         return 'Comando desconhecido. Use /ajuda.'
 
-    def executar(self, entrada):
+    def executar(self, entrada, provider=None):
         try:
-            return self.comando(entrada)
+            return self.comando(entrada, provider=provider)
         except urllib.error.HTTPError as e:
             return f'Falha HTTP {e.code}. Verifique acesso, modelo, configuração e limites da plataforma.'
         except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError, RuntimeError) as e:
