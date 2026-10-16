@@ -127,6 +127,7 @@
     <div class="sidebar-head"><span>Conversas</span><button class="sidebar-close" id="sidebarClose" type="button" aria-label="Fechar conversas">×</button></div>
     <button class="new-chat" id="newChat" type="button">＋ Nova conversa</button>
     <nav class="conversation-list" id="conversationList" aria-label="Histórico de conversas"></nav>
+    <button class="new-chat" id="clearHistory" type="button">Apagar histórico deste navegador</button>
     <p class="storage-note" id="storageNote">Salvas neste navegador. Se você apagar os dados do site, o histórico será removido.</p>
   </aside>
   <main class="shell">
@@ -199,6 +200,7 @@
     const storageNote = document.querySelector('#storageNote');
     let activeConversation = null;
     let historyDb = null;
+    const syncChannel = 'BroadcastChannel' in window ? new BroadcastChannel('mark-shaney-history') : null;
     send.disabled = true;
     let installPrompt = null;
 
@@ -244,24 +246,92 @@
         if (!historyDb) return resolve(method === 'getAll' ? [] : null);
         const transaction = historyDb.transaction('conversations', method === 'put' ? 'readwrite' : 'readonly');
         const store = transaction.objectStore('conversations');
-        const request = method === 'put' ? store.put(value) : method === 'get' ? store.get(value) : store.getAll();
-        if (method === 'put') transaction.oncomplete = () => resolve(value);
-        else request.onsuccess = () => resolve(request.result);
+        let request;
+        let result = value;
+        if (method === 'put') {
+          request = store.get(value.id);
+          request.onsuccess = () => {
+            const prior = request.result;
+            const existing = normalizeMessages(prior?.messages);
+            const known = new Set(existing.map(item => item.id));
+            const incoming = normalizeMessages(value.messages);
+            const merged = [...existing];
+            for (let i = 0; i < incoming.length; i++) {
+              const item = incoming[i];
+              if (known.has(item.id)) continue;
+              const previousId = incoming[i - 1]?.id;
+              const after = previousId ? merged.findIndex(old => old.id === previousId) : -1;
+              merged.splice(after < 0 ? merged.length : after + 1, 0, item);
+              known.add(item.id);
+            }
+            result = {...value, messages: merged};
+            store.put(result);
+          };
+          transaction.oncomplete = () => resolve(result);
+        } else {
+          request = method === 'get' ? store.get(value) : store.getAll();
+          request.onsuccess = () => resolve(request.result);
+        }
         request.onerror = () => reject(request.error);
         transaction.onerror = () => reject(transaction.error);
       });
+    }
+
+    function normalizeMessages(items) {
+      return (items || []).map((item, index) => ({
+        ...item, id: item.id || `legacy-${index}-${item.role}`
+      }));
+    }
+
+    function reconcileMessages(local, remote) {
+      const merged = normalizeMessages(local);
+      let cursor = 0;
+      for (let i = 0; i + 1 < remote.length; i += 2) {
+        const user = remote[i], assistant = remote[i + 1];
+        if (user.role !== 'user' || assistant.role !== 'assistant') continue;
+        let match = -1;
+        for (let j = cursor; j < merged.length; j++) {
+          if (merged[j].role === 'user' && merged[j].content === user.content) {
+            match = j;
+            break;
+          }
+        }
+        if (match < 0) {
+          merged.push(user, assistant);
+          cursor = merged.length;
+        } else {
+          if (merged[match + 1]?.role !== 'assistant') merged.splice(match + 1, 0, assistant);
+          cursor = match + 2;
+        }
+      }
+      return merged;
     }
 
     async function saveConversation() {
       if (!activeConversation) return;
       activeConversation.updated = Date.now();
       try {
-        await historyRequest('put', activeConversation);
+        const id = activeConversation.id;
+        const stored = await historyRequest('put', activeConversation);
+        if (activeConversation?.id === id) activeConversation = stored;
         await renderConversationList();
+        syncChannel?.postMessage({id});
       } catch {
         storageNote.textContent = 'Não foi possível salvar neste navegador. Verifique o espaço disponível.';
       }
     }
+    syncChannel?.addEventListener('message', async event => {
+      if (event.data?.cleared) {
+        document.querySelector('form[action="/logout"]').requestSubmit();
+        return;
+      }
+      if (!historyDb || !activeConversation || send.disabled) return;
+      if (event.data?.id === activeConversation.id) {
+        activeConversation = await historyRequest('get', activeConversation.id);
+        renderConversation();
+      }
+      await renderConversationList();
+    });
 
     function closeSidebar() {
       sidebar.classList.remove('open');
@@ -324,30 +394,56 @@
     document.querySelector('#newChat').addEventListener('click', () => {
       newConversation().catch(error => { storageNote.textContent = error.message; });
     });
+    document.querySelector('#clearHistory').addEventListener('click', async () => {
+      if (!confirm('Apagar todas as conversas salvas neste navegador?')) return;
+      try {
+        if (historyDb) await new Promise((resolve, reject) => {
+          const tx = historyDb.transaction('conversations', 'readwrite');
+          tx.objectStore('conversations').clear();
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error);
+        });
+        localStorage.removeItem('mark-active-conversation');
+        syncChannel?.postMessage({cleared: true});
+        document.querySelector('form[action="/logout"]').requestSubmit();
+      } catch (error) { storageNote.textContent = `Falha ao apagar histórico: ${error.message}`; }
+    });
 
     async function initializeHistory(status) {
       try { historyDb = await openHistoryDb(); }
       catch { storageNote.textContent = 'Este navegador não permitiu salvar conversas. Verifique as permissões do site.'; }
       let preferred = null;
       try { preferred = localStorage.getItem('mark-active-conversation'); } catch {}
-      let conversation = preferred ? await historyRequest('get', preferred) : null;
-      if (conversation && conversation.id !== status.conversation_id) {
-        const response = await fetch('/api/conversation/select', {
-          method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({conversation_id: conversation.id})
-        });
-        if (!response.ok) throw new Error('Falha ao recuperar a conversa.');
+      try {
+        let conversation = preferred ? await historyRequest('get', preferred) : null;
+        if (conversation && conversation.id !== status.conversation_id) {
+          const response = await fetch('/api/conversation/select', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({conversation_id: conversation.id})
+          });
+          if (!response.ok) throw new Error('Falha ao recuperar a conversa.');
+        }
+        const response = await fetch('/api/conversation/current');
+        if (!response.ok) throw new Error('Falha ao consultar o histórico.');
+        const current = await response.json();
+        if (!conversation) {
+          conversation = {id: current.conversation_id, title: 'Nova conversa',
+            updated: Date.now(), messages: []};
+        }
+        conversation.messages = reconcileMessages(conversation.messages, current.messages);
+        if (conversation.title === 'Nova conversa') {
+          conversation.title = conversation.messages.find(item => item.role === 'user')?.content.slice(0, 48) || 'Nova conversa';
+        }
+        activeConversation = conversation;
+        try { localStorage.setItem('mark-active-conversation', conversation.id); } catch {}
+        await saveConversation();
+      } catch (error) {
+        storageNote.textContent = `Histórico temporariamente indisponível: ${error.message}`;
+        activeConversation ||= {id: crypto.randomUUID(), title: 'Nova conversa', updated: Date.now(), messages: []};
+      } finally {
+        renderConversation();
+        send.disabled = false;
       }
-      if (!conversation) {
-        const current = await fetch('/api/conversation/current').then(response => response.json());
-        conversation = {id: current.conversation_id, title: current.messages.find(item => item.role === 'user')?.content.slice(0, 48) || 'Nova conversa',
-          updated: Date.now(), messages: current.messages};
-      }
-      activeConversation = conversation;
-      try { localStorage.setItem('mark-active-conversation', conversation.id); } catch {}
-      renderConversation();
-      await saveConversation();
-      send.disabled = false;
     }
 
     function addMessage(role, text, extraClass = '') {
@@ -419,7 +515,7 @@
       }
       const history = previous.slice(-8);
       addMessage('user', message);
-      activeConversation.messages.push({role: 'user', content: message});
+      activeConversation.messages.push({id: crypto.randomUUID(), role: 'user', content: message});
       if (activeConversation.title === 'Nova conversa') activeConversation.title = message.slice(0, 48);
       input.value = '';
       input.style.height = 'auto';
@@ -448,7 +544,7 @@
         }
         addExportActions(pending, data.reply);
         pending.classList.remove('typing');
-        activeConversation.messages.push({role: 'assistant', content: data.reply});
+        activeConversation.messages.push({id: crypto.randomUUID(), role: 'assistant', content: data.reply});
         await saveConversation();
       } catch (error) {
         pending.querySelector('.bubble').textContent = `Erro: ${error.message}`;

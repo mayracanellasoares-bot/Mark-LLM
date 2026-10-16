@@ -5,6 +5,8 @@ import hashlib
 import os
 import re
 import secrets
+import sqlite3
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -19,7 +21,10 @@ DATA_DIR = Path(os.environ.get("MARK_DATA_DIR", str(BASE_DIR / "data")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, static_folder="static")
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+configured_secret = os.environ.get('FLASK_SECRET_KEY')
+if os.environ.get('RENDER') and (not configured_secret or len(configured_secret) < 32):
+    raise RuntimeError('Configure FLASK_SECRET_KEY com pelo menos 32 caracteres no Render.')
+app.secret_key = configured_secret or secrets.token_hex(32)
 app.config.update(
     MAX_CONTENT_LENGTH=32 * 1024,
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
@@ -42,6 +47,38 @@ def require_login():
     return None
 
 
+@app.after_request
+def security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
+    )
+    if request.endpoint in {'home', 'login', 'current_conversation', 'status', 'chat', 'export'}:
+        response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+def _login_throttle(key: str, successful: bool = False) -> bool:
+    """A shared per-instance limit; the database survives worker threads."""
+    now = time.time()
+    with sqlite3.connect(DATA_DIR / 'login_attempts.sqlite3', timeout=5) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS attempts (key TEXT PRIMARY KEY, count INTEGER, first REAL)')
+        db.execute('DELETE FROM attempts WHERE first < ?', (now - 900,))
+        if successful:
+            db.execute('DELETE FROM attempts WHERE key=?', (key,))
+            return False
+        row = db.execute('SELECT count FROM attempts WHERE key=?', (key,)).fetchone()
+        if row and row[0] >= 5:
+            return True
+        db.execute('INSERT INTO attempts(key,count,first) VALUES(?,1,?) '
+                   'ON CONFLICT(key) DO UPDATE SET count=count+1', (key, now))
+        return False
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
@@ -49,6 +86,9 @@ def login():
             return redirect(url_for("home"))
         return send_from_directory(BASE_DIR / "static", "login.html")
 
+    key = hashlib.sha256((request.remote_addr or 'unknown').encode()).hexdigest()
+    if _login_throttle(key):
+        return jsonify({'error': 'Muitas tentativas. Aguarde 15 minutos.'}), 429
     username = request.form.get("username", "")
     password = request.form.get("password", "")
     configured_user = os.environ.get("MARK_WEB_USER", "Mark")
@@ -56,6 +96,7 @@ def login():
     if (configured_password
             and secrets.compare_digest(username, configured_user)
             and secrets.compare_digest(password, configured_password)):
+        _login_throttle(key, successful=True)
         session.clear()
         session["authenticated"] = True
         session.permanent = True
@@ -77,18 +118,20 @@ def _session_ids() -> tuple[str, str]:
     return session["visitor_id"], session["conversation_id"]
 
 
-def _new_bot() -> tuple[MarkVShaneyBR, str]:
+def _new_bot(load_previous=False) -> tuple[MarkVShaneyBR, str]:
     visitor_id, conversation_id = _session_ids()
     safe_id = hashlib.sha256(visitor_id.encode("utf-8")).hexdigest()[:32]
-    bot = MarkVShaneyBR(DATA_DIR / f"{safe_id}.sqlite3")
+    bot = MarkVShaneyBR(DATA_DIR / f"{safe_id}.sqlite3", allow_local_import=False)
     bot.sessao = conversation_id
-    previous = bot.memoria.db.execute(
-        "SELECT id, pedido FROM conversas WHERE sessao=? ORDER BY id DESC LIMIT 1",
-        (conversation_id,),
-    ).fetchone()
-    if previous:
-        bot.ultima = previous["id"]
-        bot.fontes = bot.memoria.recuperar(previous["pedido"])
+    if load_previous:
+        previous = bot.memoria.db.execute(
+            "SELECT id, pedido FROM conversas WHERE sessao=? ORDER BY id DESC LIMIT 1",
+            (conversation_id,),
+        ).fetchone()
+        if previous:
+            bot.ultima = previous["id"]
+            if request.json and isinstance(request.json.get('message'), str) and request.json['message'].startswith('/fontes'):
+                bot.fontes = bot.memoria.recuperar(previous["pedido"])
     return bot, conversation_id
 
 
@@ -153,13 +196,13 @@ def current_conversation():
     bot, conversation_id = _new_bot()
     try:
         rows = bot.memoria.db.execute(
-            'SELECT pedido,resposta FROM conversas WHERE sessao=? ORDER BY id DESC LIMIT 40',
+            'SELECT id,pedido,resposta FROM conversas WHERE sessao=? ORDER BY id DESC LIMIT 40',
             (conversation_id,),
         ).fetchall()
         messages = []
         for row in reversed(rows):
-            messages.extend([{'role': 'user', 'content': row['pedido']},
-                             {'role': 'assistant', 'content': row['resposta']}])
+            messages.extend([{'id': f"server-{row['id']}-user", 'role': 'user', 'content': row['pedido']},
+                             {'id': f"server-{row['id']}-assistant", 'role': 'assistant', 'content': row['resposta']}])
         return jsonify({'conversation_id': conversation_id, 'messages': messages})
     finally:
         bot.memoria.fechar()
@@ -172,6 +215,8 @@ def select_conversation():
     if not isinstance(conversation_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{16,80}', conversation_id):
         return jsonify({'error': 'Conversa inválida.'}), 400
     _session_ids()
+    # A client-generated UUID is allowed for a new thread. Existing threads
+    # stay inside this visitor's database; no global conversation lookup.
     session['conversation_id'] = conversation_id
     return jsonify({'conversation_id': conversation_id})
 
@@ -211,7 +256,7 @@ def chat():
                 or sum(len(item['content']) for item in history) > 16000):
             return jsonify({'error': 'Histórico inválido.'}), 400
 
-    bot, _ = _new_bot()
+    bot, _ = _new_bot(load_previous=True)
     try:
         bot.client_history = history
         reply = bot.executar(message, provider=selected, web=web, mode=mode)

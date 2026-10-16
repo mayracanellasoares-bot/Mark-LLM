@@ -337,6 +337,39 @@ class ProviderRoutingTests(unittest.TestCase):
         self.assertIn('id="newChat"', html)
         response.close()
 
+    def test_web_command_cannot_read_server_file(self):
+        response = self.client.post('/api/chat', json={'message': '/importar README.md'})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('indisponível no site', response.get_json()['reply'])
+        status = self.client.get('/api/status').get_json()
+        self.assertEqual(status['documents'], 0)
+
+    def test_login_rate_limit_and_security_headers(self):
+        visitor = web.app.test_client()
+        for _ in range(5):
+            self.assertEqual(visitor.post('/login', data={'username': 'Mark', 'password': 'wrong'}).status_code, 302)
+        self.assertEqual(visitor.post('/login', data={'username': 'Mark', 'password': 'test-password'}).status_code, 429)
+        page = self.client.get('/')
+        self.assertEqual(page.headers['X-Frame-Options'], 'DENY')
+        self.assertEqual(page.headers['Cache-Control'], 'no-store')
+        self.assertIn('frame-ancestors', page.headers['Content-Security-Policy'])
+
+    def test_fts_index_recovers_existing_document_and_new_insert(self):
+        from mark_shaney_br import Memoria
+        path = Path(self.temp_dir.name) / 'search.sqlite3'
+        memory = Memoria(path)
+        try:
+            memory.adicionar('Literatura', 'A literatura brasileira tem romances históricos.')
+        finally:
+            memory.fechar()
+        memory = Memoria(path)
+        try:
+            self.assertTrue(memory.recuperar('romances históricos'))
+            memory.adicionar('Gramática', 'Concordância verbal segue o sujeito.')
+            self.assertTrue(memory.recuperar('concordância verbal'))
+        finally:
+            memory.fechar()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -193,6 +193,7 @@ class Memoria:
         CREATE TABLE IF NOT EXISTS conversas (
             id INTEGER PRIMARY KEY, sessao TEXT, pedido TEXT, resposta TEXT,
             modo TEXT, nota INTEGER, criado REAL);
+        CREATE INDEX IF NOT EXISTS idx_conversas_sessao_id ON conversas(sessao, id DESC);
         CREATE TABLE IF NOT EXISTS correcoes (
             id INTEGER PRIMARY KEY, conversa INTEGER UNIQUE REFERENCES conversas(id),
             pedido TEXT, texto TEXT, prioridade REAL DEFAULT 1);
@@ -201,6 +202,23 @@ class Memoria:
         CREATE TABLE IF NOT EXISTS cache (url TEXT PRIMARY KEY, corpo TEXT, criado REAL);
         ''')
         self.db.commit()
+        fts_exists = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='trechos_fts'"
+        ).fetchone()
+        self.db.executescript('''
+        CREATE VIRTUAL TABLE IF NOT EXISTS trechos_fts
+            USING fts5(texto, content='trechos', content_rowid='id');
+        CREATE TRIGGER IF NOT EXISTS trechos_fts_insert AFTER INSERT ON trechos BEGIN
+            INSERT INTO trechos_fts(rowid, texto) VALUES(new.id, new.texto);
+        END;
+        CREATE TRIGGER IF NOT EXISTS trechos_fts_delete AFTER DELETE ON trechos BEGIN
+            INSERT INTO trechos_fts(trechos_fts, rowid, texto)
+            VALUES('delete', old.id, old.texto);
+        END;
+        ''')
+        if not fts_exists:
+            with self.db:
+                self.db.execute("INSERT INTO trechos_fts(trechos_fts) VALUES('rebuild')")
         self.encoder = None
         self.vetores = {}
 
@@ -220,14 +238,20 @@ class Memoria:
         return len(partes)
 
     def recuperar(self, consulta, k=6):
-        # BM25, sem instalar ou baixar modelos de embeddings.
+        # FTS limits candidates before applying the local ranker.
+        q = set(termos(consulta))
+        if not q:
+            return []
+        fts_query = ' OR '.join('"' + term.replace('"', '""') + '"' for term in q)
         rows = [dict(r) for r in self.db.execute('''SELECT t.id,t.texto,d.titulo,d.fonte,d.url,d.licenca
-                  FROM trechos t JOIN documentos d ON t.documento=d.id''')]
+                  FROM trechos_fts f JOIN trechos t ON t.id=f.rowid
+                  JOIN documentos d ON t.documento=d.id
+                  WHERE trechos_fts MATCH ? ORDER BY bm25(trechos_fts) LIMIT 200''',
+                  (fts_query,))]
         for r in self.db.execute('SELECT id,pedido,texto,prioridade FROM correcoes'):
             rows.append(dict(id=-r['id'], texto=r['texto'], titulo='Correção aprovada: ' + r['pedido'],
                              fonte='Correção do usuário', url='', licenca='Fornecido pelo usuário',
                              prioridade=r['prioridade']))
-        q = set(termos(consulta))
         if not rows or not q:
             return []
         contagens = [Counter(termos(r['titulo'] + ' ' + r['texto'])) for r in rows]
@@ -386,7 +410,7 @@ def gerar_markov(textos, limite=100):
 
 
 class MarkVShaneyBR:
-    def __init__(self, banco=None):
+    def __init__(self, banco=None, allow_local_import=True):
         self.memoria = Memoria(banco or os.getenv('MARK_DB', 'mark_shaney_memoria.sqlite3'))
         self.rede = Rede(self.memoria)
         self.sessao = str(time.time_ns())
@@ -399,6 +423,7 @@ class MarkVShaneyBR:
         self.provider_issues = []
         self.last_error = False
         self.client_history = None
+        self.allow_local_import = allow_local_import
 
     @staticmethod
     def issue(exc):
@@ -491,7 +516,7 @@ class MarkVShaneyBR:
         if urllib.parse.urlparse(url).scheme not in ('http', 'https'):
             raise ValueError('URL da LLM deve usar HTTP ou HTTPS.')
         req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=180) as res:
+        with urllib.request.urlopen(req, timeout=35) as res:
             raw = res.read(8_000_001)
         if len(raw) > 8_000_000:
             raise ValueError('Resposta da LLM excedeu 8 MB.')
@@ -622,6 +647,8 @@ class MarkVShaneyBR:
                 self.memoria.db.execute('INSERT OR REPLACE INTO preferencias VALUES(?,?)', (arg, time.time()))
             return 'Preferência salva; usada na escrita com LLM.'
         if cmd == '/importar':
+            if not self.allow_local_import:
+                return 'Importação por caminho do servidor indisponível no site.'
             caminho = Path(arg.strip('"')).expanduser()
             if caminho.suffix.lower() not in ('.txt', '.md'):
                 raise ValueError('Importe TXT ou Markdown. Converta PDF/EPUB antes.')
